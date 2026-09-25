@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Palet warna dari Afghan Product Dashboard:
+ *   #0969DA  = Sidebar & Header background       → 211 93% 45%
+ *   #0550AE  = Item aktif sidebar                → 211 91% 34%
+ *   #10B981  = Hijau (approve/success)           → 160 84% 39%
+ *   #F97316  = Orange (warning/action)           → 25 95% 53%
+ *   #A855F7  = Ungu (accent)                     → 271 91% 65%
+ *   #EF4444  = Merah (danger)                    → 0 84% 60%
+ *   #F5F6FA  = Background luar konten            → 225 33% 97%
+ *   #FFFFFF  = Card / konten utama               → 0 0% 100%
+ *   #1E293B  = Teks utama                        → 215 28% 17%
+ *   #64748B  = Teks sekunder / muted             → 215 16% 47%
+ */
+@layer base {
+  :root {
+    --background: 225 33% 97%;        /* #F5F6FA — bg luar konten */
+    --foreground: 215 28% 17%;        /* #1E293B — teks utama */
+
+    --card: 0 0% 100%;                /* #FFFFFF — card putih */
+    --card-foreground: 215 28% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+
+    --primary: 211 93% 45%;           /* #0969DA — aksen / tombol aktif */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 225 33% 97%;         /* #F5F6FA */
+    --secondary-foreground: 215 28% 17%;
+
+    --muted: 225 33% 97%;             /* #F5F6FA */
+    --muted-foreground: 215 16% 47%;  /* #64748B */
+
+    --accent: 271 91% 65%;            /* #A855F7 — ungu */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;         /* #EF4444 — merah */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 20% 88%;
+    --input: 215 20% 85%;
+    --ring: 211 93% 45%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-sm text-foreground antialiased;
+  }
+}
