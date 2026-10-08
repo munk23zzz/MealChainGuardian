@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Mapping, Protocol, Sequence
 
 from .field_mapping import (
+    BUSINESS_PARTNER_BY_SUPPLIER_NAME,
     DEFAULT_PURCHASING_ORGANIZATION,
     DEFAULT_STORAGE_LOCATION,
     MATERIAL_NUMBER_BY_COMMODITY,
@@ -129,22 +130,15 @@ def _seed_stock() -> tuple[MaterialStockRecord, ...]:
 
 def _seed_business_partners() -> tuple[BusinessPartnerRecord, ...]:
     # Nama fiktif sesuai docs/Skill.md §11 — tidak boleh menyerupai perusahaan/orang nyata.
-    return (
+    # Kode pemasok datang dari field_mapping (satu sumber), supaya provider in-memory dan provider
+    # Postgres tidak pernah berbeda identitas.
+    return tuple(
         BusinessPartnerRecord(
-            BusinessPartner="SUP-A",
-            BusinessPartnerName="Supplier A",
+            BusinessPartner=code,
+            BusinessPartnerName=name,
             PurchasingOrganization=DEFAULT_PURCHASING_ORGANIZATION,
-        ),
-        BusinessPartnerRecord(
-            BusinessPartner="SUP-B",
-            BusinessPartnerName="Supplier B",
-            PurchasingOrganization=DEFAULT_PURCHASING_ORGANIZATION,
-        ),
-        BusinessPartnerRecord(
-            BusinessPartner="SUP-C",
-            BusinessPartnerName="Supplier C",
-            PurchasingOrganization=DEFAULT_PURCHASING_ORGANIZATION,
-        ),
+        )
+        for name, code in BUSINESS_PARTNER_BY_SUPPLIER_NAME.items()
     )
 
 

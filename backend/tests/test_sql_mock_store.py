@@ -6,7 +6,6 @@ penomoran PO bertahan lintas instance, dan bahwa kolom ber-FK menolak nilai asal
 
 from __future__ import annotations
 
-import uuid
 from datetime import date
 from decimal import Decimal
 
@@ -15,20 +14,12 @@ import pg_support
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Decision, SapMockMaterialStock, SapMockPurchaseOrder, SupplyRecord
+from app.models import Decision, SapMockMaterialStock, SapMockPurchaseOrder, Supplier, SupplyRecord
 from app.sap_integration.mock_provider import MockSAPProvider
 from app.sap_integration.provider_interface import (
     CreatePurchaseOrderRequest,
     SAPProviderError,
 )
-
-
-@pytest.fixture(scope="module")
-def pg_engine():
-    try:
-        return pg_support.engine()
-    except pg_support.StoreUnavailable as exc:  # pragma: no cover - bergantung lingkungan
-        pytest.skip(str(exc))
 
 
 @pytest.fixture
@@ -93,7 +84,12 @@ def test_purchase_order_is_written_to_postgres(provider, session):
     assert row.status == "submitted"
     assert row.ordered_quantity == Decimal("700.00")
     assert row.price == Decimal("26200.00")
-    assert str(row.supplier_id) == supplier
+    # Kolom FK tetap menyimpan `suppliers.id` (UUID domain), sedangkan dokumen SAP memuat kode.
+    stored_supplier = session.get(Supplier, row.supplier_id)
+    assert stored_supplier is not None
+    assert stored_supplier.name == "Supplier A"
+    # Baca ulang lewat provider mengembalikan KODE SAP (bentuk yang sama seperti provider memory).
+    assert provider.get_purchase_orders(po_number=po.PurchaseOrder)[0].Supplier == supplier
     assert row.decision_id is None
 
 
@@ -141,13 +137,15 @@ def test_decision_reference_links_purchase_order_to_decision(provider, session):
 
 
 def test_unknown_supplier_is_rejected(provider):
+    """Kode business partner yang tidak ada di peta ditolak sebagai kesalahan provider."""
     with pytest.raises(SAPProviderError, match="(?i)business partner"):
-        provider.create_purchase_order(_request("SUP-A"))
+        provider.create_purchase_order(_request("SUP-Z"))
 
 
 def test_duplicate_po_number_is_rejected_by_the_database(provider, session):
     """UNIQUE di sap_mock_purchase_orders: invarian ditegakkan DB, bukan hanya kode Python."""
-    supplier_id = uuid.UUID(provider.get_business_partner()[0].BusinessPartner)
+    supplier_id = session.scalar(select(Supplier.id).order_by(Supplier.name).limit(1))
+    assert supplier_id is not None
     session.add(
         SapMockPurchaseOrder(
             po_number="4500000999",

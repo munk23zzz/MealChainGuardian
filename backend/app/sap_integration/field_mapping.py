@@ -52,3 +52,14 @@ DEFAULT_PURCHASING_ORGANIZATION: Final[str] = "PO01"
 
 # Satuan domain (docs/Schema.md §1: `commodities.unit` = "kg"). SAP mengirim "KG".
 DOMAIN_UNIT_BY_SAP_UNIT: Final[dict[str, str]] = {"KG": "kg"}
+
+# Pemasok: dokumen SAP memakai KODE business partner (mis. "SUP-A"), sedangkan tabel domain memakai
+# UUID (docs/Schema.md §4 `suppliers.id`). Mock memasangkan keduanya lewat NAMA pemasok, dan peta ini
+# adalah SATU-SATUNYA sumber kode itu: provider in-memory maupun Postgres membacanya dari sini,
+# sehingga identitas pemasok tidak lagi berbeda antar mode store.
+# Di produksi pasangan ini harus datang dari vendor master SAP, bukan konstanta (deviasi #15).
+BUSINESS_PARTNER_BY_SUPPLIER_NAME: Final[dict[str, str]] = {
+    "Supplier A": "SUP-A",
+    "Supplier B": "SUP-B",
+    "Supplier C": "SUP-C",
+}

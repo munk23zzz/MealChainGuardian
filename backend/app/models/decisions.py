@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -53,6 +53,7 @@ class Decision(Base):
             "outcome IS NULL OR outcome IN ('pending','success','failure')",
             name="decisions_outcome_check",
         ),
+        Index("idx_decisions_status", "status"),
     )
 
     id: Mapped[UuidPk]
@@ -98,6 +99,7 @@ class AgentTrace(Base):
     """Cermin lokal dari AgentCore Observability untuk UI Agent Activity Log."""
 
     __tablename__ = "agent_traces"
+    __table_args__ = (Index("idx_agent_traces_decision", "decision_id", "step_at"),)
 
     id: Mapped[UuidPk]
     decision_id: Mapped[uuid.UUID] = mapped_column(
@@ -120,6 +122,8 @@ class Approval(Base):
         CheckConstraint(
             "approver_role IN ('sppg_head','sppg_nutritionist')", name="approvals_role_check"
         ),
+        # docs/Schema.md §5 + §6: satu orang tidak bisa approve dua kali untuk keputusan yang sama.
+        Index("uq_approvals_decision_user", "decision_id", "approved_by", unique=True),
     )
 
     id: Mapped[UuidPk]
@@ -138,6 +142,7 @@ class Approval(Base):
 
 class KpiSnapshot(Base):
     __tablename__ = "kpi_snapshots"
+    __table_args__ = (Index("idx_kpi_name_scope", "kpi_name", "scope", "computed_at"),)
 
     id: Mapped[UuidPk]
     kpi_name: Mapped[str] = mapped_column(Text, nullable=False)

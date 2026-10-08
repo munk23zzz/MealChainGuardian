@@ -69,8 +69,9 @@ SUPPLIER_NAMES = {"Supplier A", "Supplier B", "Supplier C"}
 def _first_supplier(provider) -> str:
     """Identitas business partner diambil dari provider, bukan ditulis harfiah.
 
-    Store memory memakai kode demo (SUP-A...), store Postgres memakai `suppliers.id` (UUID).
-    Identitas adalah urusan store; yang harus identik adalah bentuk dan perilakunya.
+    Provider in-memory dan provider Postgres sama-sama mengembalikan KODE SAP (mis. `SUP-A`,
+    docs/Skill.md §11) — kode itu datang dari satu peta di `field_mapping.py`, sehingga identitas
+    pemasok tidak lagi berbeda antar mode store.
     """
     return provider.get_business_partner()[0].BusinessPartner
 

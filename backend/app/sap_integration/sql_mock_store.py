@@ -7,8 +7,9 @@ Keterbatasan yang disadari:
   * `docs/Schema.md` §4 tidak punya kolom tanggal dokumen, jadi `PurchasingDocumentDate` saat dibaca
     kembali memakai tanggal `created_at` baris itu. Perlu kolom tersendiri kalau tanggal dokumen
     harus berbeda dari tanggal pembuatan PO.
-  * Satu PO = satu transaksi. Alur approve -> execute yang butuh beberapa tulis atomik belum ada;
-    waktu alur itu dibangun, penulisan harus dibungkus satu unit of work.
+  * Satu PO = satu transaksi HANYA kalau store berdiri sendiri. Untuk alur `execute` (PO + status
+    keputusan + bukti + jejak agen harus atomik), store dipakai dengan `session=` milik pemanggil
+    sehingga seluruh tulisan berada di satu transaksi.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models import SapMockMaterialStock, SapMockPurchaseOrder, Supplier
 
 from .field_mapping import DEFAULT_PURCHASING_ORGANIZATION, MATERIAL_NUMBER_BY_COMMODITY
+from .mapping import UnmappedSapValueError, business_partner_code, supplier_name
 from .mock_provider import PO_NUMBER_BASE, _StoredPurchaseOrder
 from .provider_interface import (
     BusinessPartnerRecord,
@@ -37,17 +39,39 @@ _DESCRIPTION_BY_MATERIAL = {material: name for name, material in MATERIAL_NUMBER
 class SqlSapMockStore:
     """Store mock SAP berbasis Postgres. Satu instance = satu session (satu request)."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session] | None = None,
+        *,
+        session: Session | None = None,
+    ) -> None:
+        """Dua cara pakai, dan bedanya penting untuk transaksi:
+
+        * `SqlSapMockStore(session_factory)` — store MEMILIKI sessionnya: setiap tulis langsung
+          di-commit. Dipakai seed, tool CLI, dan test yang memang menguji store sendirian.
+        * `SqlSapMockStore(session=session)` — store MEMINJAM session milik pemanggil dan tidak
+          pernah commit/close sendiri. Dipakai endpoint `execute`, supaya PO mock dan baris domain
+          (status keputusan, bukti, jejak agen) masuk dalam SATU transaksi.
+        """
+        if (session_factory is None) == (session is None):
+            raise ValueError(
+                "Isi tepat satu: session_factory (store memiliki session) atau session (dipinjam)."
+            )
         self._session_factory = session_factory
-        self._session: Session | None = None
+        self._session = session
+        self._owns_session = session is None
 
     @property
     def session(self) -> Session:
         if self._session is None:
+            assert self._session_factory is not None
             self._session = self._session_factory()
         return self._session
 
     def close(self) -> None:
+        """Tutup session HANYA kalau store yang memilikinya; session pinjaman milik pemanggil."""
+        if not self._owns_session:
+            return
         if self._session is not None:
             self._session.close()
             self._session = None
@@ -73,16 +97,16 @@ class SqlSapMockStore:
         )
 
     def business_partners(self) -> Sequence[BusinessPartnerRecord]:
-        """BusinessPartner = `suppliers.id` (docs/Skill.md §7: suppliers.id <-> Supplier).
+        """BusinessPartner = KODE SAP (`SUP-A`, docs/Skill.md §11), bukan UUID domain.
 
-        SAP asli memakai kode alfanumerik, tabel domain kita memakai UUID — karena itu
-        identifikasinya berupa string UUID. Pertanyaan terbuka untuk Roy: apakah perlu kolom kode SAP
-        terpisah di `suppliers` supaya mock benar-benar menyerupai SAP.
+        Dokumen SAP selalu memakai kode alfanumerik, jadi provider mock pun memakai kode — sama di
+        kedua mode store. Pasangan kode <-> pemasok domain ada di `field_mapping.py`
+        (`BUSINESS_PARTNER_BY_SUPPLIER_NAME`); di produksi pasangan itu datang dari vendor master.
         """
         rows = self.session.scalars(select(Supplier).order_by(Supplier.name)).all()
         return tuple(
             BusinessPartnerRecord(
-                BusinessPartner=str(row.id),
+                BusinessPartner=business_partner_code(row.name),
                 BusinessPartnerName=row.name,
                 PurchasingOrganization=DEFAULT_PURCHASING_ORGANIZATION,
             )
@@ -105,15 +129,17 @@ class SqlSapMockStore:
         )
 
     def purchase_orders(self) -> Sequence[_StoredPurchaseOrder]:
-        rows = self.session.scalars(
-            select(SapMockPurchaseOrder).order_by(SapMockPurchaseOrder.po_number)
+        rows = self.session.execute(
+            select(SapMockPurchaseOrder, Supplier.name)
+            .join(Supplier, Supplier.id == SapMockPurchaseOrder.supplier_id)
+            .order_by(SapMockPurchaseOrder.po_number)
         ).all()
         return tuple(
             _StoredPurchaseOrder(
-                record=self._to_record(row),
+                record=self._to_record(row, supplier_name_),
                 decision_reference=str(row.decision_id) if row.decision_id else None,
             )
-            for row in rows
+            for row, supplier_name_ in rows
         )
 
     # -- tulis ------------------------------------------------------------------------
@@ -131,7 +157,12 @@ class SqlSapMockStore:
                 status=record.Status or "submitted",
             )
         )
-        self.session.commit()
+        if self._owns_session:
+            # store berdiri sendiri: satu tulis = satu transaksi
+            self.session.commit()
+        else:
+            # session milik pemanggil: dia yang memutuskan commit atau rollback
+            self.session.flush()
 
     def next_po_number(self) -> str:
         last = self.session.scalar(select(func.max(SapMockPurchaseOrder.po_number)))
@@ -141,10 +172,11 @@ class SqlSapMockStore:
     # -- pembantu ---------------------------------------------------------------------
 
     @staticmethod
-    def _to_record(row: SapMockPurchaseOrder) -> PurchaseOrderRecord:
+    def _to_record(row: SapMockPurchaseOrder, supplier_name_: str) -> PurchaseOrderRecord:
         return PurchaseOrderRecord(
             PurchaseOrder=row.po_number,
-            Supplier=str(row.supplier_id),
+            # Dokumen SAP memuat KODE (`SUP-A`), bukan UUID domain — sama seperti provider in-memory.
+            Supplier=business_partner_code(supplier_name_),
             MaterialNumber=row.material_number,
             OrderQuantity=row.ordered_quantity,
             NetPriceAmount=row.price,
@@ -153,16 +185,21 @@ class SqlSapMockStore:
             Status=row.status,
         )
 
-    @staticmethod
-    def _supplier_uuid(supplier: str) -> uuid.UUID:
+    def _supplier_uuid(self, business_partner: str) -> uuid.UUID:
+        """Kode business partner SAP -> `suppliers.id` (kolom FK tetap menyimpan UUID domain)."""
         try:
-            return uuid.UUID(supplier)
-        except ValueError as exc:
+            name = supplier_name(business_partner)
+        except UnmappedSapValueError as exc:
+            # Kesalahan pemetaan tetap dilaporkan sebagai kesalahan provider, supaya pemanggil cukup
+            # menangkap satu jenis error dari lapisan SAP (lihat juga exception handler 502 di main.py).
+            raise SAPProviderError(str(exc)) from exc
+        supplier_id = self.session.scalar(select(Supplier.id).where(Supplier.name == name))
+        if supplier_id is None:
             raise SAPProviderError(
-                f"Supplier {supplier!r} bukan UUID supplier yang dikenal. Provider mock Postgres "
-                "memakai suppliers.id sebagai identitas business partner — ambil nilainya dari "
-                "get_business_partner()."
-            ) from exc
+                f"Pemasok {name!r} dipetakan dari kode {business_partner!r} tetapi tidak ada di tabel "
+                "suppliers. Seed dan field_mapping.BUSINESS_PARTNER_BY_SUPPLIER_NAME tidak sinkron."
+            )
+        return supplier_id
 
     @staticmethod
     def _decision_uuid(decision_reference: str | None) -> uuid.UUID | None:

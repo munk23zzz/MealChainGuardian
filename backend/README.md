@@ -23,11 +23,14 @@ uv pip install fastapi "uvicorn[standard]" pytest httpx
 | Model SQLAlchemy + migrasi Alembic (`docs/Schema.md` §1-§4, 15 tabel) | Selesai (P2.2b) |
 | Store mock SAP di Postgres (`sap_integration/sql_mock_store.py`) | Selesai (P2.2b) |
 | Seed data demo + tarikan awal SAP -> `supply_records` (`app/db_seed.py`, `app/ingest.py`) | Selesai (P2.2b) |
-| Endpoint `/demand/*`, `/decisions/*`, `/actions/*` (approve -> execute -> PO) | Belum (P2.2c) |
+| Endpoint `/decisions/*` (baca: daftar + detail dengan jejak audit) | Selesai (P2.2c) |
+| Endpoint `/actions/propose|approve|execute` + aturan approval (`core/approval_rules.py`) | Selesai (P2.2c) |
+| Indeks wajib `docs/Schema.md` §5 (termasuk UNIQUE `(decision_id, approved_by)`) | Selesai (P2.2c) |
+| `POST /actions/receive` (inspeksi penerimaan) + LEARN `reliability_score` | Selesai (P2.2c-2) |
+| `POST /decisions/evaluate`, `/demand/*`, `/balance/*`, `/cost/*`, `/freshness/*`, `/safety/*`, `/price/*` | Belum (butuh `core/` + agent) |
 | Frontend dialihkan dari mock browser ke backend | Belum (P2.2d) |
 
-Total: 68 test hijau (`pytest`; naik dari 45 karena contract test kini dijalankan untuk **dua** store —
-in-memory dan Postgres — plus test khusus database).
+Total: 142 test hijau (`pytest`; 0 skip, jadi test Postgres benar-benar berjalan).
 
 ## Cara kerja adapter SAP
 
@@ -65,10 +68,22 @@ Tidak ada perubahan yang diperlukan di `core/`, `api/`, atau `agent/`.
 ## Endpoint yang sudah ada
 
 ```
-GET /health                              mode SAP per kapabilitas (diagnostik)
-GET /supply?location=&commodity=         daftar stok per batch, dalam istilah domain
-GET /supply/{location}/{commodity}       total stok satu lokasi+komoditas, dirinci per batch
+GET  /health                              mode SAP per kapabilitas (diagnostik)
+GET  /supply?location=&commodity=         daftar stok per batch, dalam istilah domain
+GET  /supply/{location}/{commodity}       total stok satu lokasi+komoditas, dirinci per batch
+GET  /decisions?status=                   daftar keputusan (default 50 terbaru)
+GET  /decisions/{id}                      satu keputusan + approval, jejak agen, bukti
+POST /actions/propose                     catat usulan keputusan (langkah DECIDE)
+POST /actions/approve                     satu suara approval (langkah manusia, bukan agen)
+POST /actions/execute                     kirim PO ke SAP (mock) — hanya setelah approval sah
+POST /actions/receive                     inspeksi penerimaan + isi outcome + LEARN pemasok
 ```
+
+Endpoint `/actions/*` butuh header `X-User-Id` (id akun demo). `POST /decisions/evaluate` dan
+endpoint alat lain (`/demand/*`, `/balance/*`, ...) belum ada — lihat tabel status di atas.
+
+`POST /actions/execute` menerima `supplier` sebagai `suppliers.id` domain (UUID): id itu yang dipakai
+UI, dan penerjemahan ke kode business partner SAP (`SUP-A`) terjadi di dalam API (deviasi #15).
 
 Semua respons stok membawa header sumber data. Contoh nyata (server uvicorn):
 
@@ -93,6 +108,82 @@ Jalur gagal juga dites, supaya tidak ada kegagalan senyap:
 | Plant/material SAP di luar peta domain | `502` `sap_mapping_error` + pesan yang menyebut file yang harus diubah |
 | Satuan selain KG | `502` (konversi satuan harus eksplisit, tidak diasumsikan) |
 | Kapabilitas di-switch ke mode yang belum diimplementasikan | `502` `sap_provider_error` |
+
+## Aturan approval (P2.2c) — di server, bukan di UI
+
+`docs/Skill.md` §9 jadi kode di `app/core/approval_rules.py` (tanpa HTTP, tanpa database, 24 test
+sendiri) dan ditegakkan di `app/api/actions.py`:
+
+| Status keputusan | Approval yang dibutuhkan | Siapa |
+|---|---|---|
+| `pending_approval` (verifier konsisten) | 1 | `sppg_head` ATAU `sppg_nutritionist`, dari SPPG penerima |
+| `verifier_flagged` | 2 | `sppg_head` DAN `sppg_nutritionist`, SPPG yang sama |
+| `verifier_unavailable` | 2 | `sppg_head` DAN `sppg_nutritionist`, SPPG yang sama |
+| `proposed` (belum diverifikasi) | — | tidak bisa di-approve sama sekali |
+
+Keputusan desain yang sengaja diambil (dan alasannya):
+
+- **Status keputusan adalah sumber kebenaran jumlah approval.** Approval pertama pada keputusan yang
+  butuh dua TIDAK menurunkan statusnya jadi `pending_approval`; kalau diturunkan, syaratnya akan
+  salah terbaca sebagai "cukup satu".
+- **Dua orang berperan sama ≠ dua approval.** Pada status yang butuh dua, peran yang diminta adalah
+  `sppg_head` DAN `sppg_nutritionist`. Dua `sppg_head` tidak memenuhi syarat.
+- **Tidak ada auto-execute.** `POST /actions/execute` menolak (`409 no_auto_execute`) selama status
+  belum `approved`; tidak ada jalur `proposed -> executed` (`docs/Schema.md` §6).
+- **Satu keputusan -> paling banyak satu PO.** Sebelum membuat PO, endpoint memeriksa PO yang sudah
+  ada untuk keputusan itu dan mengembalikan `409 already_executed`. Sejak P2.2c-2 PO dan baris domain
+  ditulis dalam SATU transaksi (store meminjam session request, satu commit di akhir), jadi jaring
+  pengaman ini tinggal untuk permintaan paralel — bukan lagi penambal transaksi yang terbelah.
+  Kegagalan di tengah alur diuji dengan sengaja: setelah PO ditulis lalu langkah berikutnya gagal,
+  tidak ada baris PO yang tertinggal dan keputusan tetap `approved`.
+
+Jalur gagal yang diuji (bukan hanya jalur bahagia):
+
+| Kondisi | Respons |
+|---|---|
+| Tanpa header `X-User-Id` / id tidak dikenal | `401` |
+| `bgn_monitor` mencoba approve | `403` `approver_role_not_allowed` |
+| Approver dari SPPG lain | `403` `approver_location_mismatch` |
+| Orang yang sama approve dua kali | `409` (dan UNIQUE index di database menolak baris kedua) |
+| Execute sebelum approval | `409` `no_auto_execute` (+ berapa approval kurang) |
+| Keputusan lewat `expires_at` | `409` `decision_expired`, status dipindahkan ke `expired` |
+| Keputusan ditolak approver | status langsung `rejected` |
+| Pemasok/material tidak ada di SAP | `422` (bukan `502` — salahnya di input, bukan di hulu) |
+
+## Penerimaan & LEARN (P2.2c-2)
+
+`POST /actions/receive` = inspeksi penerimaan (`docs/Architecture.md` §4, `design.md` §3.5b).
+Aturannya logika murni di `app/core/receiving_rules.py` (tanpa HTTP/DB), diterapkan di
+`app/api/actions.py`:
+
+| Kondisi | Respons |
+|---|---|
+| Keputusan belum `executed` | `409 decision_not_executed` |
+| Keputusan sudah punya outcome | `409 already_received` (satu inspeksi per keputusan) |
+| Pencatat bukan `sppg_nutritionist` (head / monitor) | `403 recorder_role_not_allowed` |
+| Pencatat gizi dari SPPG lain | `403 recorder_location_mismatch` |
+| `physical_condition` di luar `baik`/`rusak_sebagian`/`rusak` | `422`, ditolak sebelum menyentuh database |
+
+Kondisi fisik -> `decisions.outcome`: `baik` -> `success`, `rusak_sebagian`/`rusak` -> `failure`
+(`docs/Skill.md` §10). Bukti inspeksi ditulis sebagai `decision_evidence` bertipe `human_inspection`
+(suhu terukur, kondisi, pelaku, PO tertaut), dan perubahan skor meninggalkan jejak `agent_traces`
+langkah `LEARN`.
+
+LEARN (`app/core/learn.py`) adalah aritmetika deterministik — bukan model yang dilatih ulang:
+
+```
+skor_baru = 0.5 x skor_lama + 0.5 x success_rate(5 outcome terakhir pemasok itu)
+```
+
+hasilnya dibulatkan 2 desimal agar muat kolom `NUMERIC(3,2)`; riwayat dibaca lewat tautan PO
+(`sap_mock_purchase_orders.decision_id`) karena `decisions` tidak punya `supplier_id`
+(`docs/Schema.md` §3) — lihat deviasi #15.
+
+Bukti end-to-end (uvicorn + Postgres, bukan TestClient): keputusan Cianjur->Jakarta 700 kg melewati
+`propose -> approve -> execute` (PO `4500000003`), lalu gizi Jakarta mencatat kondisi `rusak` ->
+`decisions.outcome = failure`, `suppliers.reliability_score` Supplier A turun `0.80 -> 0.40`
+(dipertimbangkan `['failure']`, window 5), `agent_traces` berisi DECIDE/ACT/LEARN, dan inspeksi kedua
+atas keputusan yang sama ditolak `409 already_received`.
 
 ## Data & database (P2.2b)
 
@@ -167,15 +258,47 @@ Semuanya additive — field/aturan yang sudah tertulis tidak diubah:
    harus utuh, perlu kolom `purchasing_document_date`.
 8. Nama komoditas dan satuan mengikuti huruf kecil `docs/Schema.md` §1 (`telur`, `kg`), sedangkan
    sisi SAP tetap huruf besar (`TELUR-01`, `KG`). Sebelumnya API mengembalikan `Telur`/`KG`.
+9. **Identitas dulu lewat header `X-User-Id`** (`app/api/deps.py`). Penegakan peran sudah di server,
+   tapi identitasnya belum diautentikasi (tidak ada password/token). Ini mekanisme sementara sampai
+   login dikerjakan bersama frontend; jangan dianggap sebagai pengamanan.
+10. **Akun demo:** `docs/Skill.md` §9 menyebut pasangan akun Jakarta DAN Bogor. Yang dibuat sekarang:
+    Jakarta + Cianjur (masing-masing head & nutritionist) + 2 `bgn_monitor`. Cianjur ditambahkan
+    karena ia SPPG asal di dataset §11; **Bogor belum** karena Bogor tidak ada di dataset itu, dan
+    membuat lokasi tanpa stok/demand akan tampak seperti data rusak saat demo. Perlu keputusan.
+11. **`verifier_result` diberikan pemanggil** (`consistent|flagged|unavailable`) saat `POST
+    /actions/propose`, karena Verifier (SAP AI Core, `ai_providers/verifier_client.py`) belum ada
+    (P2.3). Kalau tidak diberikan, keputusan berstatus `proposed` dan TIDAK bisa di-approve — jadi
+    tidak ada keputusan yang diam-diam dianggap terverifikasi.
+12. **`execute` satu transaksi (SELESAI di P2.2c-2).** Dulu PO ditulis `sql_mock_store` dalam
+    transaksinya sendiri sementara status keputusan/bukti/jejak ditulis session API. Sekarang store
+    bisa meminjam session pemanggil (`SqlSapMockStore(session=...)`, dipakai `get_provider(session)`),
+    jadi PO + status + bukti + jejak masuk SATU commit. Diuji dengan menggagalkan langkah setelah PO:
+    tidak ada PO yang tertinggal. Catatan terbuka: dua permintaan `execute` paralel masih bisa
+    berlomba (jaring pengaman `409 already_executed`), dan itu belum diuji beban.
+13. **Dua modul `core/` baru**: `core/learn.py` (LEARN) dan `core/receiving_rules.py` (aturan
+    inspeksi). `docs/Architecture.md` §4 belum menyebut keduanya — ditambahkan supaya aturan
+    penerimaan/skor tetap logika murni yang bisa diuji tanpa HTTP, seperti `core/approval_rules.py`.
+14. **LEARN juga dijalankan saat hasilnya `success`** (`baik`), bukan hanya saat `failure`. Dokumen
+    hanya menyebut penyesuaian skor; kalau LEARN hanya turun, `reliability_score` pemasok tidak akan
+    pernah pulih lagi dan demonya jadi satu arah. Formula naik/turunnya sama (rata-rata berbobot).
+15. **Identitas pemasok: API memakai `suppliers.id` (UUID domain), provider memakai KODE SAP**
+    (`SUP-A`, `docs/Skill.md` §11). Penerjemahannya ada di `app/api/actions.py` lewat interface
+    provider (cari business partner berdasarkan nama), dan peta kode ada di
+    `field_mapping.BUSINESS_PARTNER_BY_SUPPLIER_NAME`. Sebelumnya provider mock Postgres memakai UUID
+    sementara provider memory memakai `SUP-A`, sehingga permintaan `execute` yang sah di satu mode
+    ditolak di mode lain. Dua hal yang perlu keputusan: (a) pasangan pemasok domain <-> business
+    partner sebaiknya datang dari vendor master SAP, bukan nama; (b) `decisions` tidak punya
+    `supplier_id`, jadi tautan keputusan<->pemasok untuk LEARN hanya bisa lewat PO.
 
-## Langkah berikutnya (P2.2c)
+## Langkah berikutnya
 
-Store dan tabel sudah ada; berikutnya endpoint demo yang menulis — approve -> execute -> purchase
-order — di atas tabel `decisions`, `decision_evidence`, `agent_traces`, `approvals` yang sudah
-dibuat. Penegakan "tidak ada auto-execute" (PO hanya boleh dikirim setelah `approvals.approved =
-true`) rencananya di lapisan `api/`, bukan di provider.
+P2.2c-2 selesai (`POST /actions/receive` + LEARN, 142 test hijau, bukti end-to-end di atas).
 
-Catatan teknis yang perlu dijawab lebih dulu: `sql_mock_store.add_purchase_order` sekarang menulis
-satu PO per transaksi. Alur approve -> execute butuh satu unit-of-work (keputusan, jejak agen,
-approval, dan PO masuk bersama atau tidak sama sekali), jadi transaksinya harus dipindahkan ke
-lapisan pemanggil.
+1. **P2.2d — frontend disambungkan ke backend**: ganti mock di browser dengan panggilan ke API ini,
+   termasuk login demo (menutup deviasi #9) dan papan skor pemasok yang angkanya bergerak setelah
+   inspeksi. Backend perlu `GET /suppliers` supaya UI bisa memilih pemasok saat `execute`.
+2. `POST /decisions/evaluate` + `core/` (`scoring.py`, `safe_delivered_cost.py`, `constraints.py`)
+   dan endpoint alat `/balance/*`, `/cost/*` — sebelum agent (Strands/Supervisor) bisa dijalankan,
+   karena agent memanggil endpoint ini sebagai tool.
+3. Verifier nyata (SAP AI Core, `ai_providers/verifier_client.py`) supaya `verifier_result` tidak lagi
+   diberikan pemanggil (deviasi #11).

@@ -1,7 +1,8 @@
 """MealChain Guardian — backend FastAPI (docs/Architecture.md §4).
 
-Status P2.1: baru `/health` (diagnostik mode SAP). Endpoint domain (/supply/*, /demand/*,
-/decisions/*, /actions/*) menyusul di P2.2, di atas provider yang sama.
+Sudah ada: `/health`, `/supply/*` (P2.2a), lapisan data + migrasi (P2.2b), dan siklus
+usul -> approve -> execute dengan aturan approval di server (P2.2c). Belum ada: `/actions/receive`
+(LEARN), `/decisions/evaluate`, dan endpoint alat lain (`/demand/*`, `/balance/*`, `/cost/*`, ...).
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import supply
+from app.api import actions, decisions, supply
 from app.sap_integration.factory import get_sap_provider
 from app.sap_integration.mapping import UnmappedSapValueError
 from app.sap_integration.provider_interface import SAPProviderError
@@ -17,6 +18,8 @@ from app.sap_integration.provider_interface import SAPProviderError
 app = FastAPI(title="MealChain Guardian — backend", version="0.1.0")
 
 app.include_router(supply.router)
+app.include_router(decisions.router)
+app.include_router(actions.router)
 
 
 @app.exception_handler(UnmappedSapValueError)

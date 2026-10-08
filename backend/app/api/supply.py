@@ -14,20 +14,16 @@ from decimal import Decimal
 from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, PlainSerializer
+from pydantic import BaseModel
 
+from app.api.deps import SessionDep
+from app.api.types import Quantity
 from app.sap_integration.factory import get_sap_provider
 from app.sap_integration.mapping import SupplySnapshot, to_supply_snapshots, total_quantity_kg
 from app.sap_integration.provider_interface import SAPCapability, SAPDataProvider
 from app.sap_integration.store_factory import get_mock_store
 
 router = APIRouter(tags=["supply"])
-
-# Angka domain disimpan sebagai Decimal; di JSON dikirim sebagai number (bukan string) supaya
-# frontend tidak perlu parsing khusus. Presisi tetap dijaga di sisi Python.
-Quantity = Annotated[
-    Decimal, PlainSerializer(lambda value: float(value), return_type=float, when_used="json")
-]
 
 
 class SupplyRecordOut(BaseModel):
@@ -47,13 +43,15 @@ class SupplyDetailOut(BaseModel):
     batches: list[SupplyRecordOut]
 
 
-def get_provider() -> Iterator[SAPDataProvider]:
+def get_provider(session: SessionDep) -> Iterator[SAPDataProvider]:
     """Dependency provider SAP untuk satu request.
 
     Di produksi: dibaca dari env (`SAP_*_MODE` per kapabilitas + `SAP_MOCK_STORE`). Dioverride di
-    test dengan provider apa pun. Store (mis. session Postgres) ditutup setelah request selesai.
+    test dengan provider apa pun. Store mode Postgres memakai **session request ini**, supaya
+    endpoint yang menulis (mis. `POST /actions/execute`) bisa menjadikan PO dan baris domain satu
+    transaksi. Store yang berdiri sendiri tetap ditutup setelah request selesai.
     """
-    provider = get_sap_provider(mock_store=get_mock_store())
+    provider = get_sap_provider(mock_store=get_mock_store(session))
     try:
         yield provider
     finally:

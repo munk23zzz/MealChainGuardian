@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Numeric, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +21,10 @@ PRICE_SOURCES = ("pihps_reference", "supplier_quote")
 
 class SupplyRecord(Base):
     __tablename__ = "supply_records"
-    __table_args__ = (CheckConstraint("quantity_kg >= 0", name="supply_records_quantity_check"),)
+    __table_args__ = (
+        CheckConstraint("quantity_kg >= 0", name="supply_records_quantity_check"),
+        Index("idx_supply_location_commodity", "location_id", "commodity_id"),
+    )
 
     id: Mapped[UuidPk]
     location_id: Mapped[uuid.UUID] = mapped_column(
@@ -38,7 +41,10 @@ class SupplyRecord(Base):
 
 class DemandRecord(Base):
     __tablename__ = "demand_records"
-    __table_args__ = (CheckConstraint("quantity_kg >= 0", name="demand_records_quantity_check"),)
+    __table_args__ = (
+        CheckConstraint("quantity_kg >= 0", name="demand_records_quantity_check"),
+        Index("idx_demand_location_commodity", "location_id", "commodity_id"),
+    )
 
     id: Mapped[UuidPk]
     location_id: Mapped[uuid.UUID] = mapped_column(
@@ -83,6 +89,7 @@ class Batch(Base):
             "safety_status IN ('pending','pass','fail','needs_verification')",
             name="batches_safety_status_check",
         ),
+        Index("idx_batches_safety_status", "safety_status"),
     )
 
     id: Mapped[UuidPk]

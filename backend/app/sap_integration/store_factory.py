@@ -8,6 +8,8 @@ Dua mode, diatur env `SAP_MOCK_STORE`:
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from app.config import mock_store_kind
 from app.db import get_session_factory
 
@@ -18,11 +20,20 @@ from .sql_mock_store import SqlSapMockStore
 VALID_STORES = ("memory", "postgres")
 
 
-def get_mock_store() -> SapMockStore:
+def get_mock_store(session: Session | None = None) -> SapMockStore:
+    """Store untuk `MockSAPProvider`.
+
+    `session` (opsional) membuat store memakai session milik pemanggil, sehingga tulis PO ikut
+    transaksi pemanggil — inilah yang membuat `execute` atomik (PO + status keputusan + bukti +
+    jejak agen masuk bersama, atau tidak sama sekali). Tanpa `session`, store berdiri sendiri
+    seperti sebelumnya.
+    """
     kind = mock_store_kind()
     if kind == "memory":
         return InMemorySapMockStore()
     if kind == "postgres":
+        if session is not None:
+            return SqlSapMockStore(session=session)
         return SqlSapMockStore(get_session_factory())
     raise SAPProviderError(
         f"SAP_MOCK_STORE={kind!r} tidak dikenal (pilihan: {', '.join(VALID_STORES)})"

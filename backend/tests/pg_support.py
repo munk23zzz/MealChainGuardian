@@ -10,12 +10,22 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine, delete, text
+from sqlalchemy import Engine, create_engine, delete, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db_seed import seed_demo_data
-from app.models import Base, SapMockMaterialStock, SapMockPurchaseOrder, SupplyRecord
+from app.db_seed import SUPPLIERS, seed_demo_data
+from app.models import (
+    AgentTrace,
+    Approval,
+    Base,
+    Decision,
+    DecisionEvidence,
+    SapMockMaterialStock,
+    SapMockPurchaseOrder,
+    Supplier,
+    SupplyRecord,
+)
 from app.sap_integration.mock_provider import MockSAPProvider
 from app.sap_integration.sql_mock_store import SqlSapMockStore
 
@@ -69,9 +79,30 @@ def session_factory() -> sessionmaker[Session]:
 
 
 def reset_dynamic_tables(session: Session) -> None:
-    """Kosongkan tabel yang ditulis provider & seed supaya tiap test mulai dari nol."""
-    for model in (SapMockPurchaseOrder, SapMockMaterialStock, SupplyRecord):
+    """Kosongkan tabel yang ditulis provider, seed, dan endpoint aksi.
+
+    Urutannya penting: tabel anak dulu (FK), baru induknya — `decisions` menjadi induk bagi
+    `approvals`, `decision_evidence`, dan `agent_traces`. `suppliers.reliability_score` juga
+    dikembalikan ke angka seed karena alur LEARN menulis ke master data; tanpa ini test saling
+    mewarisi skor yang sudah bergerak.
+    """
+    for model in (
+        Approval,
+        DecisionEvidence,
+        AgentTrace,
+        # PO mock mereferensikan decisions.decision_id -> harus dihapus sebelum decisions
+        SapMockPurchaseOrder,
+        Decision,
+        SapMockMaterialStock,
+        SupplyRecord,
+    ):
         session.execute(delete(model))
+    for spec in SUPPLIERS:
+        session.execute(
+            update(Supplier)
+            .where(Supplier.name == spec["name"])
+            .values(reliability_score=spec["reliability_score"])
+        )
     session.commit()
 
 

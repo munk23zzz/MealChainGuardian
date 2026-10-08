@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Iterable, Mapping, Sequence
 
 from .field_mapping import (
+    BUSINESS_PARTNER_BY_SUPPLIER_NAME,
     DOMAIN_UNIT_BY_SAP_UNIT,
     MATERIAL_NUMBER_BY_COMMODITY,
     PLANT_CODE_BY_LOCATION,
@@ -97,3 +98,32 @@ def to_supply_snapshots(records: Iterable[MaterialStockRecord]) -> list[SupplySn
 
 def total_quantity_kg(snapshots: Sequence[SupplySnapshot]) -> Decimal:
     return sum((s.quantity_kg for s in snapshots), start=Decimal("0"))
+
+
+_SUPPLIER_NAME_BY_BUSINESS_PARTNER: Mapping[str, str] = {
+    code: name for name, code in BUSINESS_PARTNER_BY_SUPPLIER_NAME.items()
+}
+
+
+def business_partner_code(supplier_name: str) -> str:
+    """Nama pemasok domain -> kode business partner SAP (dokumen SAP memakai kode)."""
+    try:
+        return BUSINESS_PARTNER_BY_SUPPLIER_NAME[supplier_name]
+    except KeyError as exc:
+        dikenal = ", ".join(sorted(BUSINESS_PARTNER_BY_SUPPLIER_NAME)) or "(kosong)"
+        raise UnmappedSapValueError(
+            f"Pemasok {supplier_name!r} belum punya kode business partner SAP (dikenal: {dikenal}). "
+            f"Tambahkan di app/sap_integration/field_mapping.py."
+        ) from exc
+
+
+def supplier_name(business_partner: str) -> str:
+    """Kode business partner SAP -> nama pemasok domain (kebalikannya `business_partner_code`)."""
+    try:
+        return _SUPPLIER_NAME_BY_BUSINESS_PARTNER[business_partner]
+    except KeyError as exc:
+        dikenal = ", ".join(sorted(_SUPPLIER_NAME_BY_BUSINESS_PARTNER)) or "(kosong)"
+        raise UnmappedSapValueError(
+            f"BusinessPartner {business_partner!r} belum dipetakan ke pemasok domain "
+            f"(dikenal: {dikenal}). Tambahkan di app/sap_integration/field_mapping.py."
+        ) from exc

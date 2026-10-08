@@ -66,12 +66,22 @@ MATERIAL_STOCK_ROWS = (
 )
 
 # Akun demo (docs/Skill.md §9). Hash di bawah PLACEHOLDER — bukan kredensial, dan login belum ada.
+#
+# CATATAN (perlu keputusan Roy): §9 menyebut akun demo untuk Jakarta dan Bogor. Jakarta ada di sini;
+# Bogor BELUM, karena Bogor tidak ada di dataset §11 (Cianjur surplus, Jakarta kekurangan) sehingga
+# lokasinya belum ada dan stok/demand-nya akan kosong — lebih baik akunnya menyusul bersama datanya
+# daripada membuat lokasi tanpa isi. Cianjur ditambahkan (additive) karena ia SPPG asal di dataset.
 DEMO_USERS = (
+    {"name": "Kepala SPPG Jakarta", "email": "kepala.jakarta@demo.local", "role": "sppg_head",
+     "location": "Jakarta"},
+    {"name": "Ahli Gizi Jakarta", "email": "gizi.jakarta@demo.local", "role": "sppg_nutritionist",
+     "location": "Jakarta"},
     {"name": "Kepala SPPG Cianjur", "email": "kepala.cianjur@demo.local", "role": "sppg_head",
      "location": "Cianjur"},
     {"name": "Ahli Gizi Cianjur", "email": "gizi.cianjur@demo.local", "role": "sppg_nutritionist",
      "location": "Cianjur"},
-    {"name": "Monitor BGN", "email": "monitor@demo.local", "role": "bgn_monitor", "location": None},
+    {"name": "Monitor BGN 1", "email": "monitor1@demo.local", "role": "bgn_monitor", "location": None},
+    {"name": "Monitor BGN 2", "email": "monitor2@demo.local", "role": "bgn_monitor", "location": None},
 )
 PLACEHOLDER_PASSWORD_HASH = "!dev-placeholder-bukan-kredensial"
 
