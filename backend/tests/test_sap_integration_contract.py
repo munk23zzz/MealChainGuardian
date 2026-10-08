@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date
+from typing import Any
 from decimal import Decimal
 
 import pytest
@@ -62,17 +63,48 @@ SEED_STOCK = {
     ("CJ01", "TELUR-01"): Decimal("1400.00"),  # Cianjur, surplus 900 kg
     ("JK01", "TELUR-01"): Decimal("300.00"),  # Jakarta, shortage 700 kg
 }
-SEED_PARTNERS = {"SUP-A": "Supplier A", "SUP-B": "Supplier B", "SUP-C": "Supplier C"}
+SUPPLIER_NAMES = {"Supplier A", "Supplier B", "Supplier C"}
 
 
-def _request(**overrides) -> CreatePurchaseOrderRequest:
-    base = dict(
+def _first_supplier(provider) -> str:
+    """Identitas business partner diambil dari provider, bukan ditulis harfiah.
+
+    Store memory memakai kode demo (SUP-A...), store Postgres memakai `suppliers.id` (UUID).
+    Identitas adalah urusan store; yang harus identik adalah bentuk dan perilakunya.
+    """
+    return provider.get_business_partner()[0].BusinessPartner
+
+
+def _assert_same_except_document_date(actual: PurchaseOrderRecord, expected: PurchaseOrderRecord) -> None:
+    """Bandingkan PO kecuali tanggal dokumen.
+
+    `docs/Schema.md` §4 tidak punya kolom tanggal dokumen, jadi store Postgres memakai `created_at`
+    saat membaca kembali. Perlu kolom sendiri kalau tanggal harus benar-benar identik.
+    """
+    for field_name in (
+        "PurchaseOrder",
+        "Supplier",
+        "MaterialNumber",
+        "OrderQuantity",
+        "NetPriceAmount",
+        "Status",
+        "ApprovalStatus",
+        "FiscalYear",
+        "CompanyCode",
+    ):
+        assert getattr(actual, field_name) == getattr(expected, field_name)
+
+
+def _request(**overrides: Any) -> CreatePurchaseOrderRequest:
+    """Permintaan PO contoh. `DecisionReference` sengaja None: tautan ke keputusan adalah
+    bookkeeping mock kita, bukan bagian kontrak SAP — diuji terpisah."""
+    base: dict[str, Any] = dict(
         Supplier="SUP-A",
         MaterialNumber="TELUR-01",
         OrderQuantity=Decimal("700.00"),
         NetPriceAmount=Decimal("26200.00"),
         PurchasingDocumentDate=date(2026, 10, 8),
-        DecisionReference="dec-002",
+        DecisionReference=None,
     )
     base.update(overrides)
     return CreatePurchaseOrderRequest(**base)
@@ -147,57 +179,74 @@ def test_material_stock_filters(contract_provider):
 
 def test_business_partner_seed_matches_demo_dataset(contract_provider):
     partners = contract_provider.get_business_partner()
-    assert {p.BusinessPartner: p.BusinessPartnerName for p in partners} == SEED_PARTNERS
+
+    assert {p.BusinessPartnerName for p in partners} == SUPPLIER_NAMES
     assert {p.PurchasingOrganization for p in partners} == {"PO01"}
-    assert [p.BusinessPartner for p in contract_provider.get_business_partner(business_partner="SUP-C")] == [
-        "SUP-C"
-    ]
+    ids = [p.BusinessPartner for p in partners]
+    assert all(ids) and len(set(ids)) == 3
+    assert [
+        p.BusinessPartner
+        for p in contract_provider.get_business_partner(business_partner=ids[0])
+    ] == [ids[0]]
 
 
 def test_product_master_exposes_seeded_material(contract_provider):
     material = contract_provider.get_product_master(material_number="TELUR-01")
     assert len(material) == 1
-    assert material[0].ProductDescription == "Telur"
+    assert material[0].ProductDescription == "telur"
     assert material[0].BaseUnit == "KG"
 
 
 def test_purchase_order_roundtrip_and_po_number_format(contract_provider):
     assert contract_provider.get_purchase_orders() == []
 
-    request = _request()
-    po = contract_provider.create_purchase_order(request)
+    supplier = _first_supplier(contract_provider)
+    po = contract_provider.create_purchase_order(_request(Supplier=supplier))
 
     assert isinstance(po, PurchaseOrderRecord)
     assert po.PurchaseOrder == "4500000001"
     assert len(po.PurchaseOrder) == 10
     assert po.PurchaseOrder.startswith("450000")
     assert po.Status == "submitted"
-    assert po.Supplier == request.Supplier
-    assert po.MaterialNumber == request.MaterialNumber
-    assert po.OrderQuantity == request.OrderQuantity
-    assert po.NetPriceAmount == request.NetPriceAmount
-    assert po.PurchasingDocumentDate == request.PurchasingDocumentDate
+    assert po.Supplier == supplier
+    assert po.MaterialNumber == "TELUR-01"
+    assert po.OrderQuantity == Decimal("700.00")
+    assert po.NetPriceAmount == Decimal("26200.00")
+    assert isinstance(po.PurchasingDocumentDate, date)
 
     # field wajib SAP asli tidak boleh bocor dari mock (§7)
     assert po.ApprovalStatus is None
     assert po.FiscalYear is None
     assert po.CompanyCode is None
 
-    # bisa dibaca balik lewat ketiga filter
-    assert contract_provider.get_purchase_orders(po_number=po.PurchaseOrder) == [po]
-    assert contract_provider.get_purchase_orders(supplier="SUP-A") == [po]
-    assert contract_provider.get_purchase_orders(decision_reference="dec-002") == [po]
-    assert contract_provider.get_purchase_orders(decision_reference="dec-999") == []
+    # dibaca balik lewat filter po_number dan supplier
+    back = contract_provider.get_purchase_orders(po_number=po.PurchaseOrder)
+    assert len(back) == 1
+    _assert_same_except_document_date(back[0], po)
+    assert contract_provider.get_purchase_orders(supplier=supplier) == back
 
     # nomor PO naik, PO kedua ikut tersimpan
-    po2 = contract_provider.create_purchase_order(_request(DecisionReference="dec-003"))
+    po2 = contract_provider.create_purchase_order(_request(Supplier=supplier))
     assert po2.PurchaseOrder == "4500000002"
     assert len(contract_provider.get_purchase_orders()) == 2
-    assert contract_provider.get_purchase_orders(decision_reference="dec-003") == [po2]
+
+
+def test_decision_reference_is_mock_bookkeeping(mock_provider):
+    """Tautan PO <-> keputusan tidak ada di SAP asli: ia bookkeeping internal kita.
+
+    Karena itu tidak diuji di kontrak bersama — store memory menyimpan string bebas, sedangkan store
+    Postgres menyimpannya di kolom UUID ber-FK ke `decisions.id` (docs/Schema.md §4).
+    """
+    po = mock_provider.create_purchase_order(_request(DecisionReference="dec-002"))
+
+    assert mock_provider.get_purchase_orders(decision_reference="dec-002") == [po]
+    assert mock_provider.get_purchase_orders(decision_reference="dec-999") == []
 
 
 def test_purchase_order_status_can_be_draft(contract_provider):
-    po = contract_provider.create_purchase_order(_request(Status="draft"))
+    supplier = _first_supplier(contract_provider)
+    po = contract_provider.create_purchase_order(_request(Supplier=supplier, Status="draft"))
+
     assert po.Status == "draft"
 
 
@@ -213,8 +262,11 @@ def test_purchase_order_status_can_be_draft(contract_provider):
     ],
 )
 def test_purchase_order_validation_rejects_bad_input(contract_provider, overrides, pesan):
+    base = {"Supplier": _first_supplier(contract_provider)}
+    base.update(overrides)
+
     with pytest.raises(SAPProviderError, match=pesan):
-        contract_provider.create_purchase_order(_request(**overrides))
+        contract_provider.create_purchase_order(_request(**base))
 
 
 class TestRouter:

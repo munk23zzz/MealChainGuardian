@@ -1,0 +1,4 @@
+# Rahasia & konfigurasi lokal — jangan pernah di-commit.
+.env
+.env.local
+docker-compose.override.yml

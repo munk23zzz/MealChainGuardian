@@ -35,7 +35,8 @@ from .provider_interface import (
 )
 
 _PO_NUMBER_BASE = 4_500_000_000
-_PO_STATUSES = ("draft", "submitted", "confirmed")
+PO_NUMBER_BASE = _PO_NUMBER_BASE  # dipakai juga oleh store SQL agar penomoran konsisten
+PO_STATUSES = ("draft", "submitted", "confirmed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +104,9 @@ class InMemorySapMockStore:
 
 
 def _seed_stock() -> tuple[MaterialStockRecord, ...]:
-    eggs = MATERIAL_NUMBER_BY_COMMODITY["Telur"]
+    # Diambil dari peta komoditas->material, bukan literal, supaya nama komoditas boleh berubah
+    # mengikuti docs/Schema.md tanpa memecahkan seed.
+    eggs = next(iter(MATERIAL_NUMBER_BY_COMMODITY.values()))
     return (
         MaterialStockRecord(
             MaterialNumber=eggs,
@@ -159,6 +162,12 @@ class MockSAPProvider(SAPDataProvider):
 
     def __init__(self, store: SapMockStore | None = None) -> None:
         self._store: SapMockStore = store if store is not None else InMemorySapMockStore()
+
+    def close(self) -> None:
+        """Tutup resource store kalau ia punya (store Postgres memegang session)."""
+        close = getattr(self._store, "close", None)
+        if callable(close):
+            close()
 
     # -- identitas ---------------------------------------------------------------------
 
@@ -271,7 +280,7 @@ class MockSAPProvider(SAPDataProvider):
             raise SAPProviderError(
                 f"NetPriceAmount tidak boleh negatif, dapat {request.NetPriceAmount!r}"
             )
-        if request.Status not in _PO_STATUSES:
+        if request.Status not in PO_STATUSES:
             raise SAPProviderError(
-                f"Status PO tidak valid: {request.Status!r} (pilihan: {', '.join(_PO_STATUSES)})"
+                f"Status PO tidak valid: {request.Status!r} (pilihan: {', '.join(PO_STATUSES)})"
             )

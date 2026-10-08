@@ -148,6 +148,15 @@ class SAPDataProvider(ABC):
     def supported_capabilities(self) -> frozenset[SAPCapability]:
         """Kapabilitas yang benar-benar diimplementasikan (stub mengembalikan himpunan kosong)."""
 
+    def data_source_for(self, capability: SAPCapability) -> DataSource:
+        """Sumber data untuk satu kapabilitas.
+
+        Default: seluruh kapabilitas satu provider bersumber sama. Router per-kapabilitas
+        (`factory.SAPProviderRouter`) meng-override ini supaya label bisa berbeda antar kapabilitas
+        tanpa pemanggil tahu bedanya.
+        """
+        return self.data_source
+
     @abstractmethod
     def get_material_stock(
         self,

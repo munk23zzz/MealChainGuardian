@@ -41,9 +41,14 @@ PLANT_CODE_BY_LOCATION: Final[dict[str, str]] = {
     "Jakarta": "JK01",
 }
 
+# Nama komoditas mengikuti `docs/Schema.md` §1 (`commodities.name`: "telur", huruf kecil) —
+# dokumen adalah kontrak, jadi istilah tampilan pun ikut huruf kecil.
 MATERIAL_NUMBER_BY_COMMODITY: Final[dict[str, str]] = {
-    "Telur": "TELUR-01",
+    "telur": "TELUR-01",
 }
 
 DEFAULT_STORAGE_LOCATION: Final[str] = "SL01"
 DEFAULT_PURCHASING_ORGANIZATION: Final[str] = "PO01"
+
+# Satuan domain (docs/Schema.md §1: `commodities.unit` = "kg"). SAP mengirim "KG".
+DOMAIN_UNIT_BY_SAP_UNIT: Final[dict[str, str]] = {"KG": "kg"}
