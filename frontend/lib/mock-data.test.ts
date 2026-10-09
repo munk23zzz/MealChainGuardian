@@ -1,8 +1,9 @@
 /**
  * Penjaga dataset demo (`lib/mock-data.ts`).
  *
- * Kenapa ada: dataset ini tumbuh (10 -> 22 lokasi, 3 -> 9 komoditas) dan angka pasokan
- * ditulis tangan, jadi satu angka salah (mis. `usableStockKg` > `physicalStockKg`, atau
+ * Kenapa ada: angka pasokan ditulis tangan, dan dataset ini pernah diperluas (lalu
+ * dikembalikan ke lingkup dokumen: 10 lokasi × 3 komoditas), jadi satu angka salah
+ * (mis. `usableStockKg` > `physicalStockKg`, atau
  * harga tertinggal satu nol) hanya akan terlihat sebagai "demo aneh" saat presentasi.
  * Test ini memeriksa konsistensi ANTAR tabel, bukan cuma bentuk tipe.
  *

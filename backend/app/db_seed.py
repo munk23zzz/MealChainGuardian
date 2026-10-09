@@ -206,7 +206,7 @@ SUPPLY_ROWS = (
      "batch_count": 1, "price_per_kg": Decimal("36500.00"), "safety": "pass",
      "freshness_hours": 12, "temperature_c": None},
 
-    # --- komoditas tambahan (langkah 2: 10 lokasi x 9 komoditas menu MBG) ----------
+    # --- komoditas tambahan pada dua titik baku demo (lingkup tetap 3 komoditas: telur, ayam, wortel) ---
     {"location": "Jakarta", "commodity": "ayam", "quantity": Decimal("750.00"),
      "batch_count": 3, "price_per_kg": Decimal("35000.00"), "safety": "pass",
      "freshness_hours": 72, "temperature_c": None},
