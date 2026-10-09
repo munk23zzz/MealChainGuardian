@@ -14,6 +14,8 @@ Modul ini murni: tanpa HTTP, tanpa database, tanpa ORM — supaya bisa diuji tan
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Sequence
 
@@ -78,3 +80,62 @@ def adjusted_reliability(
     blended = HALF * Decimal(current) + HALF * rate
     clamped = min(max(blended, Decimal("0")), Decimal("1"))
     return clamped.quantize(SCORE_PLACES, ROUND_HALF_UP)
+
+
+@dataclass(frozen=True)
+class DeliveryEvent:
+    """Satu penerimaan yang SUDAH diputuskan — bahan replay skor (design.md §3.9c)."""
+
+    at: datetime
+    outcome: str  # success | failure
+    decision_id: str
+
+
+@dataclass(frozen=True)
+class ScorePoint:
+    """Satu titik grafik riwayat pemasok (`SupplierScorePoint` di schema UI)."""
+
+    at: datetime | None
+    score: Decimal
+    outcome: str | None
+    is_incident: bool
+    decision_id: str | None
+
+
+def replay_reliability(base: Decimal, events: Sequence[DeliveryEvent]) -> list[ScorePoint]:
+    """Deret skor dari replay LEARN — cermin `frontend/lib/reliability.ts`.
+
+    Titik pertama (`at=None`) adalah skor SEBELUM ada penerimaan; sesudahnya satu titik per
+    penerimaan, urut waktu. `is_incident` menandai pengiriman gagal ATAU skor yang turun, sama
+    seperti `reliabilitySeries`. Karena rumusnya deterministik, titik terakhir harus sama dengan
+    `suppliers.reliability_score` yang tersimpan (diuji di `tests/test_supplier_history.py`).
+    """
+    ordered = sorted(events, key=lambda event: event.at)
+    points = [
+        ScorePoint(
+            at=None,
+            score=Decimal(base).quantize(SCORE_PLACES, ROUND_HALF_UP),
+            outcome=None,
+            is_incident=False,
+            decision_id=None,
+        )
+    ]
+
+    outcomes: list[str] = []
+    score = points[0].score
+    for event in ordered:
+        before = score
+        outcomes.append(event.outcome)
+        score = adjusted_reliability(before, outcomes)
+        points.append(
+            ScorePoint(
+                at=event.at,
+                score=score,
+                outcome=event.outcome,
+                # Sama seperti UI: gagal ATAU turun = insiden. Gagal tapi skor tetap (mis. sudah
+                # 0) tetap ditandai, karena kejadiannya memang insiden.
+                is_incident=event.outcome == "failure" or score < before,
+                decision_id=event.decision_id,
+            )
+        )
+    return points

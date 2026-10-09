@@ -259,7 +259,7 @@ export function getSupplierHistory(supplierId: string): Promise<SupplierHistory>
     if (!history) return Promise.reject(new Error("Pemasok tidak ditemukan"));
     return mockDelay(history);
   }
-  return request<SupplierHistory>(`/suppliers/${supplierId}/history`);
+  return request<SupplierHistory>(`/ui/suppliers/${supplierId}/history`);
 }
 
 const PHYSICAL_CONDITION_LABELS: Record<

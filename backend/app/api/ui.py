@@ -51,6 +51,7 @@ from app.models import (
     Supplier,
 )
 from app.core.kpi import DecisionFact, PriceFact, compute_kpi
+from app.core.learn import DeliveryEvent, replay_reliability
 from app.sap_integration.field_mapping import PLANT_CODE_BY_LOCATION
 
 router = APIRouter(prefix="/ui", tags=["ui"])
@@ -146,6 +147,35 @@ class SupplierOut(BaseModel):
     name: str
     location_id: str = Field(serialization_alias="locationId")
     reliability_score: float = Field(serialization_alias="reliabilityScore")
+
+
+class SupplierHistoryOut(BaseModel):
+    """`SupplierHistory` di `frontend/lib/api/schema.d.ts` (design.md §3.9c).
+
+    Skor di-replay dari penerimaan yang sudah diputuskan; UI tidak pernah menghitung skor sendiri.
+    """
+
+    supplier_id: str = Field(serialization_alias="supplierId")
+    current_score: float = Field(serialization_alias="currentScore")
+    points: list["SupplierScorePointOut"]
+    events: list["SupplierDeliveryEventOut"]
+
+
+class SupplierScorePointOut(BaseModel):
+    at: datetime | None
+    score: float
+    outcome: str | None
+    is_incident: bool = Field(serialization_alias="isIncident")
+    decision_id: str | None = Field(default=None, serialization_alias="decisionId")
+
+
+class SupplierDeliveryEventOut(BaseModel):
+    at: datetime
+    outcome: str
+    decision_id: str = Field(serialization_alias="decisionId")
+    commodity_id: str = Field(serialization_alias="commodityId")
+    quantity_kg: float = Field(serialization_alias="quantityKg")
+    note: str | None = None
 
 
 class CostCandidateOut(BaseModel):
@@ -943,3 +973,114 @@ def get_kpi(session: SessionDep, _user: CurrentUser) -> KpiSnapshotOut:
 
     values, unavailable = compute_kpi(facts, price_facts)
     return KpiSnapshotOut(**values, unavailable=unavailable)
+
+
+# --- Riwayat pemasok (design.md §3.9c) ---------------------------------------------------------
+
+#: Schema.md §1: `suppliers.reliability_score` DEFAULT 0,80 — skor sebelum ada penerimaan.
+DEFAULT_RELIABILITY = Decimal("0.80")
+
+
+def _decided_deliveries(
+    session: Session, supplier_id: uuid.UUID
+) -> list[tuple[Decision, SapMockPurchaseOrder, datetime, str | None]]:
+    """Penerimaan pemasok ini yang sudah punya hasil (success/failure), urut waktu.
+
+    Yang menjadi penanda waktu: bukti inspeksi penerimaan (`human_inspection.recorded_at`) kalau
+    ada — itu saat kondisi barang benar-benar dinilai; kalau belum ada, langkah ACT; terakhir
+    `decisions.created_at`.
+    """
+    rows = session.execute(
+        select(Decision, SapMockPurchaseOrder)
+        .join(SapMockPurchaseOrder, SapMockPurchaseOrder.decision_id == Decision.id)
+        .where(SapMockPurchaseOrder.supplier_id == supplier_id)
+        .where(Decision.outcome.in_(("success", "failure")))
+    ).all()
+    if not rows:
+        return []
+
+    decision_ids = [decision.id for decision, _ in rows]
+    when: dict[uuid.UUID, datetime] = {}
+    notes: dict[uuid.UUID, str] = {}
+
+    for item in session.scalars(
+        select(DecisionEvidence)
+        .where(DecisionEvidence.decision_id.in_(decision_ids))
+        .where(DecisionEvidence.evidence_type == "human_inspection")
+        .order_by(DecisionEvidence.recorded_at)
+    ):
+        when.setdefault(item.decision_id, item.recorded_at)
+        payload = item.payload if isinstance(item.payload, dict) else {}
+        note = payload.get("note") or payload.get("physical_condition")
+        if note:
+            notes.setdefault(item.decision_id, str(note))
+
+    for trace in session.scalars(
+        select(AgentTrace)
+        .where(AgentTrace.decision_id.in_(decision_ids))
+        .where(AgentTrace.step_name == "ACT")
+        .order_by(AgentTrace.step_at)
+    ):
+        when.setdefault(trace.decision_id, trace.step_at)
+
+    decided = [
+        (decision, order, when.get(decision.id, decision.created_at), notes.get(decision.id))
+        for decision, order in rows
+    ]
+    return sorted(decided, key=lambda row: row[2])
+
+
+@router.get("/suppliers/{supplier_id}/history", response_model=SupplierHistoryOut)
+def get_supplier_history(
+    session: SessionDep, _user: CurrentUser, supplier_id: str
+) -> SupplierHistoryOut:
+    """Riwayat skor satu pemasok: replay LEARN dari penerimaan nyata (Skill.md §10).
+
+    Titik pertama adalah skor awal 0,80 (DEFAULT Schema.md §1), lalu setiap penerimaan
+    `success`/`failure` menggeser skor dengan formula yang sama seperti `frontend/lib/reliability.ts`.
+    Karena rumusnya deterministik, titik terakhir harus sama dengan `reliability_score` tersimpan —
+    kalau tidak, ada kejadian yang tidak tersimpan PO-nya.
+    """
+    try:
+        parsed = uuid.UUID(supplier_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"id pemasok bukan UUID: {supplier_id!r}") from None
+
+    supplier = session.get(Supplier, parsed)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail=f"Pemasok tidak ditemukan: {supplier_id}")
+
+    deliveries = _decided_deliveries(session, supplier.id)
+    points = replay_reliability(
+        DEFAULT_RELIABILITY,
+        [
+            DeliveryEvent(at=at, outcome=decision.outcome or "", decision_id=str(decision.id))
+            for decision, _, at, _ in deliveries
+        ],
+    )
+
+    return SupplierHistoryOut(
+        supplier_id=str(supplier.id),
+        current_score=float(supplier.reliability_score),
+        points=[
+            SupplierScorePointOut(
+                at=point.at,
+                score=float(point.score),
+                outcome=point.outcome,
+                is_incident=point.is_incident,
+                decision_id=point.decision_id,
+            )
+            for point in points
+        ],
+        events=[
+            SupplierDeliveryEventOut(
+                at=at,
+                outcome=decision.outcome or "",
+                decision_id=str(decision.id),
+                commodity_id=str(decision.commodity_id or ""),
+                quantity_kg=float(decision.quantity_kg or 0),
+                note=note,
+            )
+            for decision, _, at, note in deliveries
+        ],
+    )
