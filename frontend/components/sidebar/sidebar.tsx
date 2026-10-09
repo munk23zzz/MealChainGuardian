@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -120,14 +121,21 @@ export function Sidebar() {
         >
           <div
             className={cn(
-              "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20 text-white text-xs font-bold select-none transition-colors",
-              !expanded && "group hover:bg-white/30",
+              "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 select-none transition-colors",
+              !expanded && "group hover:bg-white/20",
             )}
           >
-            <span className={cn(!expanded && "group-hover:hidden")}>MG</span>
+            <Image
+              src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/img/logo.png`}
+              alt="MealChain Guardian logo"
+              width={28}
+              height={28}
+              className={cn("object-contain", !expanded && "group-hover:hidden")}
+              priority
+            />
             {!expanded && (
               <ChevronRight
-                className="h-4 w-4 hidden group-hover:block"
+                className="h-4 w-4 hidden group-hover:block text-white"
                 aria-hidden="true"
               />
             )}
