@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ErrorState } from "@/components/ui/error-state";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status/status-badge";
 import { useSupplier } from "@/hooks/use-data";
@@ -82,11 +83,18 @@ export function SupplierDetailPanel({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{data ? data.supplier.name : "Detail pemasok"}</DialogTitle>
-          <DialogDescription>
-            Isi panel ini datang dari data yang tersimpan (batch, kuotasi harga, purchase order,
-            riwayat usulan eksklusi) — tidak ada angka yang ditaksir di layar.
-          </DialogDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <DialogTitle>{data ? data.supplier.name : "Detail pemasok"}</DialogTitle>
+              <DialogDescription>
+                Isi panel ini datang dari data yang tersimpan (batch, kuotasi harga, purchase order,
+                riwayat usulan eksklusi) — tidak ada angka yang ditaksir di layar.
+              </DialogDescription>
+            </div>
+            {/* Panel ini bisa ditautkan (`?pemasok=<id>`): tombol salin memakai URL halaman
+                saat ini, jadi yang dibagikan persis pemasok yang sedang dibuka. */}
+            {data && <CopyLinkButton label="Salin tautan pemasok" className="shrink-0" />}
+          </div>
         </DialogHeader>
 
         {error && (

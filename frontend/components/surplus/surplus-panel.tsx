@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Download, Recycle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useUrlParam } from "@/hooks/use-url-param";
 import { buildReport, reportFileName, type ExportColumn } from "@/lib/export";
 import { formatRemaining } from "@/lib/four-hour";
 import { formatTime } from "@/lib/format";
@@ -21,6 +22,7 @@ import {
   type MockBatch,
 } from "@/lib/mock-compliance";
 import { planSurplus, TARGET_KIND_LABELS } from "@/lib/surplus";
+import { matchParamToIds } from "@/lib/view-params";
 
 type SurplusExportRow = {
   tujuan: string;
@@ -60,6 +62,7 @@ function downloadCsv(fileName: string, content: string) {
 export function SurplusPanel({
   now,
   batches = MOCK_BATCHES,
+  emptyAction,
 }: {
   now: number;
   /**
@@ -68,11 +71,25 @@ export function SurplusPanel({
    * sendiri (mis. di test/demo).
    */
   batches?: MockBatch[];
+  /**
+   * Tindakan yang ditawarkan saat tidak ada batch di cakupan (skill `empty-states`:
+   * "helpful message AND action"). Halaman yang mengirim tombol "Tampilkan semua wilayah",
+   * karena hanya halaman yang tahu saklar cakupannya.
+   */
+  emptyAction?: ReactNode;
 }) {
-  const [batchId, setBatchId] = useState(batches[0]?.id ?? "");
   const [portions, setPortions] = useState(150);
-
-  const batch = batches.find((item) => item.id === batchId) ?? batches[0];
+  // Pilihan batch ikut URL (`?batch=`) supaya tautan ke satu batch bisa dibagikan dan
+  // pilihannya pulih saat kembali (skill `deep-linking`). Nilai dari URL harus lolos
+  // `matchParamToIds` terhadap batch yang SUDAH tersaring cakupan — URL tidak boleh
+  // membuka batch wilayah lain.
+  const [batchParam, setBatchParam] = useUrlParam("batch");
+  const selectedId = matchParamToIds(
+    batchParam,
+    batches.map((item) => item.id),
+  );
+  const batch =
+    batches.find((item) => item.id === selectedId) ?? batches[0];
 
   /**
    * Tidak ada batch di cakupan peran (mis. kepala SPPG wilayah yang belum punya batch
@@ -83,6 +100,7 @@ export function SurplusPanel({
       <EmptyState
         title="Belum ada batch di wilayah Anda"
         description="Rencana alokasi sisa pangan hanya bisa disusun untuk batch yang berada di cakupan peran Anda. Batch wilayah lain tidak ditampilkan di sini."
+        action={emptyAction}
       />
     );
   }
@@ -138,7 +156,7 @@ export function SurplusPanel({
                 key={item.id}
                 variant={item.id === batch.id ? "default" : "outline"}
                 size="sm"
-                onClick={() => setBatchId(item.id)}
+                onClick={() => setBatchParam(item.id)}
               >
                 {item.id}
               </Button>

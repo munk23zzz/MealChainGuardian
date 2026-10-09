@@ -21,12 +21,14 @@ import { SkeletonCard } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { SupplierDetailPanel } from "@/components/suppliers/supplier-detail-panel";
 import { useCommodities, useLocations, useSuppliers } from "@/hooks/use-data";
+import { useUrlParam } from "@/hooks/use-url-param";
 import { useAuth } from "@/contexts/auth";
 import { proposeSupplierExclusion } from "@/lib/api";
 import type { Supplier } from "@/lib/api/schema";
 import { formatDateTime } from "@/lib/format";
 import { scopeForRole } from "@/lib/role";
 import { isLocationInScope, scopeLabel } from "@/lib/scope";
+import { matchParamToIds } from "@/lib/view-params";
 import { commodityLabel, locationLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
@@ -52,11 +54,22 @@ export default function SuppliersPage() {
   const { data: commodities } = useCommodities();
 
   /**
-   * Panel detail (`GET /ui/suppliers/{id}`). Dibuka dari tombol "Detail" per baris; id pemasok
-   * menjadi kunci query, jadi panel yang sama dipakai untuk semua baris — tidak ada panel per baris
-   * yang memanggil backend sebelum diminta.
+   * Panel detail (`GET /ui/suppliers/{id}`). Dibuka dari tombol "Detail" per baris ATAU
+   * langsung lewat tautan `?pemasok=<id>` (skill `deep-linking`) — supaya seorang kepala bisa
+   * mengirim persis pemasok yang sedang dibahas. Id dari URL hanya diterima bila ada di
+   * `ordered`, yaitu daftar yang SUDAH tersaring cakupan peran: tautan tidak bisa membuka
+   * pemasok di luar cakupan (Rules.md §1.4).
    */
   const [detailTarget, setDetailTarget] = useState<Supplier | null>(null);
+  const [supplierParam, setSupplierParam] = useUrlParam("pemasok");
+  const openDetail = (supplier: Supplier) => {
+    setDetailTarget(supplier);
+    setSupplierParam(supplier.id);
+  };
+  const closeDetail = () => {
+    setDetailTarget(null);
+    setSupplierParam(null);
+  };
 
   /**
    * Batasan peran (design.md §1.4): pemasok dipetakan ke lokasi asalnya
@@ -80,6 +93,18 @@ export default function SuppliersPage() {
     () => [...scopedSuppliers].sort((a, b) => a.reliabilityScore - b.reliabilityScore),
     [scopedSuppliers],
   );
+
+  /**
+   * Id pemasok yang panelnya terbuka: dari klik tombol, atau dari tautan `?pemasok=<id>`.
+   * `matchParamToIds` menolak id apa pun yang tidak ada di `ordered` (daftar tersaring
+   * cakupan), jadi tautan tidak bisa membuka pemasok di luar cakupan peran.
+   */
+  const detailId =
+    detailTarget?.id ??
+    matchParamToIds(
+      supplierParam,
+      ordered.map((item) => item.id),
+    );
 
   /**
    * Eksklusi pemasok (`Rules.md` §1.2). Dialog ini HANYA mengirim USULAN: yang tercatat adalah
@@ -220,7 +245,7 @@ export default function SuppliersPage() {
               >
                 <button
                   type="button"
-                  onClick={() => setDetailTarget(s)}
+                  onClick={() => openDetail(s)}
                   aria-label={`Lihat detail ${s.name}`}
                   className="min-w-0 flex-1 rounded-md text-left"
                 >
@@ -253,7 +278,7 @@ export default function SuppliersPage() {
                   <span className="tabular-nums font-semibold text-navy-900">
                     {s.reliabilityScore.toFixed(2)}
                   </span>
-                  <Button variant="ghost" onClick={() => setDetailTarget(s)}>
+                  <Button variant="ghost" onClick={() => openDetail(s)}>
                     Detail
                   </Button>
                   {s.status === "active" && userCanApprove && (
@@ -351,10 +376,10 @@ export default function SuppliersPage() {
       </Dialog>
 
       <SupplierDetailPanel
-        supplierId={detailTarget?.id ?? null}
-        open={detailTarget !== null}
+        supplierId={detailId ?? null}
+        open={detailId !== null}
         onOpenChange={(open) => {
-          if (!open) setDetailTarget(null);
+          if (!open) closeDetail();
         }}
         locationLabel={(id) => locationLabel(id, locations ?? [])}
         commodityLabel={(id) => commodityLabel(id, commodities ?? [])}

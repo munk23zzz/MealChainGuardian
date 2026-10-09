@@ -14,9 +14,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DataSourceBadge } from "@/components/ui/data-source-badge";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/auth";
+import { useUrlParam } from "@/hooks/use-url-param";
 import { BIZ_STEP_LABELS, sortByTime } from "@/lib/epcis";
 import { formatDateTime } from "@/lib/format";
 import {
@@ -26,6 +28,7 @@ import {
   readingsForBatch,
 } from "@/lib/mock-compliance";
 import { partitionBatchesByScope } from "@/lib/region-map";
+import { matchParamToIds } from "@/lib/view-params";
 import { scopeForRole } from "@/lib/role";
 
 const COMMODITY_KEYWORDS = [
@@ -57,9 +60,13 @@ function commoditiesForMenu(menu: string): string[] {
  */
 export default function CompliancePage() {
   const [now, setNow] = useState<number | null>(null);
-  const [batchId, setBatchId] = useState(MOCK_BATCHES[0].id);
   const { role, region, locationId, canApprove } = useAuth();
   const [showAllScopes, setShowAllScopes] = useState(false);
+  // Batch terpilih ikut URL supaya tautan ke satu batch bisa dibagikan dan pilihan pulih
+  // saat kembali (skill `deep-linking`/`state-preservation`). Saklar "tampilkan semua
+  // wilayah" SENGAJA tidak masuk URL: ia memperluas cakupan peran, dan tautan seperti itu
+  // akan menyebar ke orang yang tidak berhak (Rules.md §1.4).
+  const [batchParam, setBatchParam] = useUrlParam("batch");
 
   const roleScope = useMemo(
     () => scopeForRole(role, { region, locationId }),
@@ -104,7 +111,10 @@ export default function CompliancePage() {
           dan jejak lot EPCIS untuk batch yang dipilih.
         </p>
       </div>
-      <DataSourceBadge />
+      <div className="flex flex-wrap items-center gap-2">
+        <CopyLinkButton label="Salin tautan batch" />
+        <DataSourceBadge />
+      </div>
     </div>
   );
 
@@ -121,10 +131,15 @@ export default function CompliancePage() {
     />
   );
 
-  // Batch terpilih bisa jatuh di luar cakupan setelah peran/mode berubah: jatuh ke batch
-  // pertama yang MASIH dalam cakupan, bukan tetap menampilkan yang terlarang.
+  // Batch terpilih bisa jatuh di luar cakupan setelah peran/mode berubah, atau URL memuat id
+  // di luar cakupan: `matchParamToIds` menolaknya dan kita jatuh ke batch pertama yang MASIH
+  // dalam cakupan — bukan tetap menampilkan yang terlarang.
+  const selectedId = matchParamToIds(
+    batchParam,
+    scopedBatches.map((item) => item.id),
+  );
   const batch =
-    scopedBatches.find((item) => item.id === batchId) ?? scopedBatches[0];
+    scopedBatches.find((item) => item.id === selectedId) ?? scopedBatches[0];
 
   if (!batch) {
     return (
@@ -134,6 +149,17 @@ export default function CompliancePage() {
         <EmptyState
           title="Belum ada batch di wilayah Anda"
           description="Tidak ada batch demo di cakupan peran Anda, jadi tidak ada bukti CCP yang bisa ditampilkan. Batch wilayah lain sengaja tidak dibuka di sini."
+          action={
+            roleScope.kind !== "all" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllScopes(true)}
+              >
+                Tampilkan semua wilayah
+              </Button>
+            )
+          }
         />
       </div>
     );
@@ -156,7 +182,7 @@ export default function CompliancePage() {
             key={item.id}
             variant={item.id === batch.id ? "default" : "outline"}
             size="sm"
-            onClick={() => setBatchId(item.id)}
+            onClick={() => setBatchParam(item.id)}
           >
             {item.id}
           </Button>

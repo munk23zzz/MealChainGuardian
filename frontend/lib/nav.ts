@@ -15,12 +15,20 @@ export type NavItem = {
   field?: boolean;
 };
 
+/**
+ * Peran yang boleh memakai Surplus & Limbah (kerja dapur). Dipakai DUA tempat dan wajib
+ * sama: `NAV_ITEMS` di bawah, dan penjaga halaman `/surplus` sendiri. Tanpa penjaga itu,
+ * peran yang tidak ditawari menu ini tetap bisa membukanya lewat URL dan melihat isinya —
+ * aturan `empty-nav-state` menuntut halaman menjelaskan alasannya, bukan berjalan diam-diam.
+ */
+export const SURPLUS_ROLES: Role[] = ["sppg_head", "sppg_nutritionist"];
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", field: true },
   { href: "/today", label: "Hari Ini", field: true },
   { href: "/decisions", label: "Keputusan", field: true },
   { href: "/compliance", label: "Keamanan Pangan", field: true },
-  { href: "/surplus", label: "Surplus & Limbah", roles: ["sppg_head", "sppg_nutritionist"] },
+  { href: "/surplus", label: "Surplus & Limbah", roles: SURPLUS_ROLES },
   { href: "/suppliers", label: "Pemasok" },
   { href: "/agent-log", label: "Agent Log" },
   { href: "/quality", label: "Kualitas Agen" },
