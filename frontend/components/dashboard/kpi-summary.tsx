@@ -41,7 +41,7 @@ export function KpiSummary() {
             backend demo).
           </p>
         </div>
-        <Link href="/kpi" className="text-sm text-brand hover:underline">
+        <Link href="/kpi" className="tap-target text-sm text-brand hover:underline">
           KPI lengkap →
         </Link>
       </CardHeader>

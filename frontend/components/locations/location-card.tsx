@@ -28,7 +28,7 @@ export function LocationCard({
       <CardHeader className="flex-row items-start justify-between gap-2 space-y-0">
         <div className="min-w-0">
           <CardTitle className="truncate">
-            <Link href={`/dashboard?location=${location.id}`} className="hover:underline">
+            <Link href={`/dashboard?location=${location.id}`} className="tap-target hover:underline">
               {location.name}
             </Link>
           </CardTitle>

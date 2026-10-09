@@ -57,7 +57,7 @@ export default function SourcesPage() {
                       href={entry.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-brand hover:underline"
+                      className="tap-target items-center gap-1 text-brand hover:underline"
                     >
                       Buka sumber
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden />

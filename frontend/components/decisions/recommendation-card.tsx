@@ -56,7 +56,7 @@ export function RecommendationCard({
           </ToneBadge>
           <Link
             href={`/decisions/${recommendation.id}`}
-            className="ml-auto font-medium text-navy-700 hover:underline"
+            className="tap-target ml-auto font-medium text-navy-700 hover:underline"
           >
             Lihat detail
           </Link>

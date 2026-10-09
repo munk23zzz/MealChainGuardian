@@ -102,7 +102,7 @@ export default function LoginPage() {
                 <input
                   id="username"
                   autoComplete="username"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-navy-900 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring"
+                  className="h-11 rounded-md border border-input bg-background px-3 text-sm text-navy-900 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring sm:h-9"
                   {...register("username")}
                 />
                 {errors.username && (
@@ -127,7 +127,7 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   autoComplete="current-password"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-navy-900 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring"
+                  className="h-11 rounded-md border border-input bg-background px-3 text-sm text-navy-900 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring sm:h-9"
                   {...register("password")}
                 />
                 {errors.password && (

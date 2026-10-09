@@ -279,7 +279,7 @@ export default function SuppliersPage() {
                 value={supplierQuery}
                 onChange={(e) => setSupplierQuery(e.target.value)}
                 placeholder="Cari nama atau id pemasok…"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="h-11 w-full rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9"
               />
             </label>
             <label className="flex items-center gap-2">
@@ -287,7 +287,7 @@ export default function SuppliersPage() {
               <select
                 value={supplierStatus}
                 onChange={(e) => setSupplierStatus(e.target.value as SupplierStatusFilter)}
-                className="h-9 cursor-pointer rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="h-11 cursor-pointer rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9"
               >
                 <option value="all">Semua status</option>
                 <option value="active">Aktif</option>
@@ -352,7 +352,7 @@ export default function SuppliersPage() {
                   type="button"
                   onClick={() => openDetail(s)}
                   aria-label={`Lihat detail ${s.name}`}
-                  className="min-w-0 flex-1 basis-40 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="min-h-11 min-w-0 flex-1 basis-40 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
                 >
                   <span className="flex items-center gap-2 truncate font-medium text-navy-900">
                     {s.name}

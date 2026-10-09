@@ -60,7 +60,10 @@ export function MetricStrip({
               {item.value}
             </p>
             {item.hint && (
-              <p className="truncate text-xs text-muted-foreground" title={item.hint}>
+              // Di bawah `sm` petunjuk dibiarkan membungkus penuh: tooltip `title` tidak ada
+              // artinya di layar sentuh, jadi teksnya tidak boleh dipotong di ponsel
+              // (skill UI/UX, aturan "Compact Label Overflow": jangan pakai hover-only tooltip).
+              <p className="text-xs text-muted-foreground sm:truncate" title={item.hint}>
                 {item.hint}
               </p>
             )}

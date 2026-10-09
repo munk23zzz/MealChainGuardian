@@ -99,7 +99,7 @@ export default function DecisionDetailPage() {
   return (
     <div className="flex flex-col gap-6 pb-4">
       <div className="animate-fade-up">
-        <Link href="/decisions" className="text-brand hover:underline">
+        <Link href="/decisions" className="tap-target text-brand hover:underline">
           ← Kembali ke feed
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -287,7 +287,7 @@ export default function DecisionDetailPage() {
           </div>
           <Link
             href={`/agent-log?decision=${decision.id}`}
-            className="text-navy-700 hover:underline"
+            className="tap-target text-navy-700 hover:underline"
           >
             Buka Agent Activity Log
           </Link>

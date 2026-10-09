@@ -108,6 +108,25 @@
   .animate-live {
     animation: mcx-live 1.6s ease-in-out infinite;
   }
+
+  /*
+   * Tinggi sentuh minimal 44px untuk kontrol kecil (chip filter, tautan aksi baris, ikon topbar)
+   * pada layar <640px — aturan skill UI/UX Pro Max prioritas 2 ("Min size 44×44px"), sebelumnya
+   * tombol-tombol ini hanya 29–36px sehingga sulit ditekan di ponsel. Dari breakpoint `sm` ke atas
+   * kembali ringkas supaya dashboard tetap padat. Tanpa media query ini, angka 44px harus ditulis
+   * ulang di puluhan tempat.
+   */
+  .tap-target {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+
+  @media (min-width: 640px) {
+    .tap-target {
+      min-height: 0;
+    }
+  }
 }
 
 @layer base {
@@ -119,5 +138,22 @@
   }
   body {
     @apply bg-background text-sm text-foreground antialiased;
+  }
+}
+
+/*
+ * Kontrol peta MapLibre (zoom in/out, kompas) berukuran 29px — terlalu kecil untuk jari.
+ *
+ * Dua jebakan yang membuat aturan ini harus duduk di sini, BUKAN di dalam `@layer utilities`:
+ * 1. Tailwind membuang aturan di `@layer utilities` yang nama kelasnya tidak muncul di berkas
+ *    sumber — `.maplibregl-ctrl-group` hanya ada di CSS pihak ketiga, jadi aturannya terhapus
+ *    tanpa peringatan (pernah kejadian: `grep maplibregl-ctrl-group` = 0 di CSS hasil build).
+ * 2. `maplibre-gl.css` diimpor di dalam komponen (`components/map/map-view.tsx`) sehingga
+ *    urutannya SETELAH globals.css; CSS tanpa layer di akhir berkas + `!important` mengalahkannya.
+ */
+@media (max-width: 639px) {
+  .maplibregl-ctrl-group button {
+    width: 44px !important;
+    height: 44px !important;
   }
 }

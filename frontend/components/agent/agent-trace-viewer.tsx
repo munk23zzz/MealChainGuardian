@@ -208,7 +208,7 @@ export function AgentTraceViewer({
 
               {(input || output) && (
                 <details className="mt-1">
-                  <summary className="cursor-pointer text-xs text-brand hover:underline">
+                  <summary className="tap-target cursor-pointer text-xs text-brand hover:underline">
                     Detail input &amp; output
                   </summary>
                   <dl className="mt-1.5 rounded-md border border-border bg-muted/40 px-3 py-2">

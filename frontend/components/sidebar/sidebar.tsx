@@ -166,7 +166,7 @@ export function Sidebar() {
                 aria-current={active ? "page" : undefined}
                 title={!expanded ? item.label : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                  "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors sm:min-h-0",
                   expanded ? "justify-start" : "justify-center",
                   active
                     ? "bg-brand-active text-white font-medium"

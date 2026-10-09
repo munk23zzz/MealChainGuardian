@@ -172,12 +172,12 @@ function AgentLogPageInner() {
       {/* Filter per decision_id + pencarian (design.md §3.4) */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-3">
-          <label className="flex items-center gap-2">
-            <span className="font-medium text-muted-foreground">Keputusan:</span>
+          <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+            <span className="shrink-0 font-medium text-muted-foreground">Keputusan:</span>
             <select
               value={decisionFilter}
               onChange={(e) => setDecisionFilter(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-11 w-full min-w-0 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-auto"
             >
               <option value="all">Semua keputusan</option>
               {scopedDecisions.map((d) => (
@@ -192,7 +192,7 @@ function AgentLogPageInner() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Cari step / tool / input / output…"
-            className="h-9 w-full max-w-sm rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-11 w-full max-w-sm rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9"
           />
 
         </CardContent>
@@ -241,7 +241,7 @@ function AgentLogPageInner() {
                 <CardTitle className="flex flex-wrap items-center gap-2">
                   <Link
                     href={`/decisions/${decisionId}`}
-                    className="hover:underline"
+                    className="inline-flex min-h-11 items-center hover:underline sm:min-h-0"
                   >
                     #{decisionId}
                   </Link>
@@ -258,7 +258,7 @@ function AgentLogPageInner() {
                 </CardTitle>
                 <Link
                   href={`/decisions/${decisionId}`}
-                  className="text-brand hover:underline"
+                  className="inline-flex min-h-11 items-center text-brand hover:underline sm:min-h-0"
                 >
                   Lihat keputusan
                 </Link>

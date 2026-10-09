@@ -57,7 +57,7 @@ export function AttentionList({
                 </span>
                 <Link
                   href={`/decisions?location=${location.id}`}
-                  className="shrink-0 text-sm text-brand hover:underline"
+                  className="inline-flex min-h-11 shrink-0 items-center text-sm text-brand hover:underline sm:min-h-0"
                 >
                   Lihat keputusan →
                 </Link>

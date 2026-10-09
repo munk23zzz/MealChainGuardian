@@ -24,7 +24,10 @@ export function DataSourceBadge({ className }: { className?: string }) {
     <span
       title="Data pada sesi ini berasal dari mock SAP, bukan SAP produksi"
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border border-navy-700/30 bg-navy-100 px-2 py-0.5 text-xs font-medium text-navy-900",
+        // `whitespace-nowrap shrink-0` mengikuti aturan skill UI/UX "Compact Label Overflow":
+        // label ringkas yang nilainya tetap tidak boleh pecah ke baris kedua; yang mengalah
+        // adalah kotak pencarian (flex-1) di sebelahnya, bukan labelnya.
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-navy-700/30 bg-navy-100 px-2 py-0.5 text-xs font-medium text-navy-900",
         className,
       )}
     >

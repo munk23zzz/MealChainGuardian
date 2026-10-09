@@ -169,7 +169,7 @@ export function SurplusPanel({
               min={0}
               value={portions}
               onChange={(event) => setPortions(Number(event.target.value) || 0)}
-              className="h-9 w-32 rounded-md border border-input bg-card px-2 text-sm tabular-nums text-navy-900"
+              className="h-11 w-32 rounded-md border border-input bg-card px-2 text-sm tabular-nums text-navy-900 sm:h-9"
             />
           </label>
         </div>

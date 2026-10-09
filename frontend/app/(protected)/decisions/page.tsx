@@ -166,7 +166,7 @@ function DecisionsPageInner() {
             <button
               type="button"
               onClick={() => setShowAllScopes((v) => !v)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
+              className="tap-target rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
             >
               {showAllScopes ? "Batasi ke cakupan saya" : "Tampilkan semua wilayah"}
             </button>
@@ -194,7 +194,7 @@ function DecisionsPageInner() {
                 {locationLabel(locationFilter, locations)}
               </strong>
             </p>
-            <Link href="/decisions" className="text-brand hover:underline">
+            <Link href="/decisions" className="tap-target text-brand hover:underline">
               Tampilkan semua lokasi
             </Link>
           </CardContent>
@@ -207,7 +207,7 @@ function DecisionsPageInner() {
             key={s.value}
             onClick={() => setStatusFilter(s.value)}
             className={cn(
-              "rounded-md border px-3 py-1.5 text-sm transition-colors",
+              "tap-target rounded-md border px-3 py-1.5 text-sm transition-colors",
               statusFilter === s.value
                 ? "border-brand bg-brand text-white"
                 : "border-border bg-card text-muted-foreground hover:text-foreground",

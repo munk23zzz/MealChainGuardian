@@ -126,7 +126,7 @@ export function CommandPalette() {
             }}
             aria-label="Cari halaman, keputusan, pemasok, atau lokasi"
             placeholder="Cari halaman, keputusan, pemasok, lokasi…"
-            className="w-full bg-transparent py-1.5 text-sm text-navy-900 outline-none placeholder:text-grey-500"
+            className="h-11 w-full bg-transparent py-0 text-sm text-navy-900 outline-none placeholder:text-grey-500 sm:h-auto sm:py-1.5"
           />
           <kbd className="hidden shrink-0 rounded border border-navy-100 px-1.5 py-0.5 text-[10px] text-grey-500 sm:block">
             Esc

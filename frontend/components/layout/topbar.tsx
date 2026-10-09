@@ -404,7 +404,7 @@ export function TopBar() {
           placeholder="Cari keputusan, lokasi…"
           aria-label="Cari"
           autoComplete="off"
-          className="w-full rounded-md bg-white/10 py-1.5 pl-9 pr-3 text-sm text-white placeholder:text-white/60 outline-none focus:ring-2 focus:ring-white/40 transition"
+          className="h-11 w-full rounded-md bg-white/10 py-0 pl-9 pr-3 text-sm text-white placeholder:text-white/60 outline-none focus:ring-2 focus:ring-white/40 transition sm:h-auto sm:py-1.5"
         />
         {searchOpen && (
           <SearchDropdown
@@ -423,7 +423,7 @@ export function TopBar() {
           onClick={toggleNotif}
           aria-label={`Notifikasi${badge > 0 ? `, ${badge} belum dibaca` : ""}`}
           aria-expanded={notifOpen}
-          className="relative rounded-full p-1.5 text-white/70 hover:bg-white/10 hover:text-white transition"
+          className="relative rounded-full p-3 text-white/70 hover:bg-white/10 hover:text-white transition sm:p-1.5"
         >
           <Bell className="h-5 w-5" />
           {badge > 0 && (

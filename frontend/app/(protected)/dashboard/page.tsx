@@ -272,7 +272,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setShowAllScopes((v) => !v)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
+              className="tap-target rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
             >
               {showAllScopes
                 ? `Batasi ke ${scopeLabel(roleScope)}`
@@ -466,7 +466,7 @@ export default function DashboardPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold text-navy-900">Rekomendasi menunggu</h2>
-          <Link href="/decisions" className="text-brand hover:underline">
+          <Link href="/decisions" className="tap-target text-brand hover:underline">
             Lihat semua
           </Link>
         </div>
@@ -507,7 +507,7 @@ function FilterButton({
     <button
       onClick={onClick}
       className={cn(
-        "rounded-md border px-3 py-1.5 text-sm transition-colors",
+        "tap-target rounded-md border px-3 py-1.5 text-sm transition-colors",
         active
           ? "border-brand bg-brand text-white"
           : "border-border bg-card text-muted-foreground hover:text-foreground",

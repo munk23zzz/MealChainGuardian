@@ -55,7 +55,7 @@ export function ScopeNotice({
           <button
             type="button"
             onClick={onToggle}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
+            className="tap-target rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
           >
             {showingAll
               ? `Batasi ke ${roleScope ? scopeLabel(roleScope) : "wilayah Anda"}`
