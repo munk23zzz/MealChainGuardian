@@ -45,7 +45,17 @@ export function SupplyDemandChart({
 
   return (
     <div className="h-full min-h-[200px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      {/*
+        `debounce` WAJIB ada di sini — bukan hiasan. Rail sidebar bertransisi 300ms, dan
+        `ResponsiveContainer` mengamati lebar lewat ResizeObserver tanpa throttle: setiap
+        frame transisi menghasilkan satu setState + satu siklus store Recharts. Deru itu
+        (terukur 1204 mutasi DOM dalam satu klik "Tutup sidebar") membuat React menembus
+        batas "maximum update depth" (error #185) dan seluruh halaman dashboard digantikan
+        error boundary. Dengan debounce 150ms, callback ResizeObserver dithrottle (mode
+        trailing) sehingga chart menyesuaikan ~2 kali, bukan ~20 kali. Regression harness:
+        `count-chart-mutations.js` + `loop-185.js` (lihat skill frontend).
+      */}
+      <ResponsiveContainer width="100%" height="100%" debounce={150}>
         <BarChart
           data={data}
           margin={{ left: 8, right: 16, top: 12, bottom: 4 }}

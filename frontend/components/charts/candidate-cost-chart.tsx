@@ -33,7 +33,9 @@ export function CandidateCostChart({
 
   return (
     <div className="h-48 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      {/* `debounce` sama alasannya dengan SupplyDemandChart: tanpa throttle, deru ukuran
+          dari tata letak yang beranimasi bisa menembus batas update React (#185). */}
+      <ResponsiveContainer width="100%" height="100%" debounce={150}>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 32, top: 4, bottom: 4 }}>
           {/* Grid — garis vertikal saja (chart horizontal) */}
           <CartesianGrid
