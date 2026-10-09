@@ -17,6 +17,7 @@ import type {
   Recommendation,
   Location,
   Supplier,
+  SupplierDetail,
 } from "./api/schema";
 import {
   MOCK_USERS,
@@ -29,6 +30,7 @@ import {
   MOCK_KPI_PREVIOUS,
   MOCK_SUPPLIERS,
 } from "./mock-data";
+import { buildMockSupplierDetail } from "./supplier-detail";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -241,6 +243,23 @@ export function getKpi(): Promise<KpiSnapshot> {
 export function getSuppliers(): Promise<Supplier[]> {
   if (USE_MOCK) return mockDelay(MOCK_SUPPLIERS.map((s) => ({ ...s })));
   return request<Supplier[]>("/ui/suppliers");
+}
+
+/**
+ * Detail satu pemasok (`GET /ui/suppliers/{id}`) — batch, kuotasi, purchase order, riwayat eksklusi.
+ *
+ * Di mode mock isinya DITURUNKAN dari data yang sudah ada (`lib/supplier-detail.ts`), bukan tabel
+ * baru: batch dari baris pasokan lokasi pemasok itu, kuotasi dari harga baris yang sama, PO dari
+ * keputusan yang punya PO dengan sumber = lokasi pemasok. Panelnya ikut ditandai "Data Simulasi",
+ * jadi tidak ada yang mengaku sebagai data nyata.
+ */
+export function getSupplier(id: string): Promise<SupplierDetail> {
+  if (USE_MOCK) {
+    const supplier = MOCK_SUPPLIERS.find((s) => s.id === id);
+    if (!supplier) return Promise.reject(new Error("Pemasok tidak ditemukan"));
+    return mockDelay(buildMockSupplierDetail(supplier, MOCK_SUPPLY, mockDecisions));
+  }
+  return request<SupplierDetail>(`/ui/suppliers/${id}`);
 }
 
 /** Panjang alasan eksklusi minimum — cerminan aturan backend (`app/core/supplier_exclusion.py`). */

@@ -19,14 +19,15 @@ import { ErrorState } from "@/components/ui/error-state";
 import { MetricStrip } from "@/components/ui/metric-strip";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
-import { useLocations, useSuppliers } from "@/hooks/use-data";
+import { SupplierDetailPanel } from "@/components/suppliers/supplier-detail-panel";
+import { useCommodities, useLocations, useSuppliers } from "@/hooks/use-data";
 import { useAuth } from "@/contexts/auth";
 import { proposeSupplierExclusion } from "@/lib/api";
 import type { Supplier } from "@/lib/api/schema";
 import { formatDateTime } from "@/lib/format";
 import { scopeForRole } from "@/lib/role";
 import { isLocationInScope, scopeLabel } from "@/lib/scope";
-import { locationLabel } from "@/lib/labels";
+import { commodityLabel, locationLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,6 +49,14 @@ function scoreTone(score: number): "safe" | "warning" | "danger" {
 export default function SuppliersPage() {
   const { data: suppliers, error, isPending, isFetching, refetch } = useSuppliers();
   const { data: locations } = useLocations();
+  const { data: commodities } = useCommodities();
+
+  /**
+   * Panel detail (`GET /ui/suppliers/{id}`). Dibuka dari tombol "Detail" per baris; id pemasok
+   * menjadi kunci query, jadi panel yang sama dipakai untuk semua baris — tidak ada panel per baris
+   * yang memanggil backend sebelum diminta.
+   */
+  const [detailTarget, setDetailTarget] = useState<Supplier | null>(null);
 
   /**
    * Batasan peran (design.md §1.4): pemasok dipetakan ke lokasi asalnya
@@ -203,7 +212,12 @@ export default function SuppliersPage() {
                 style={{ animationDelay: `${i * 50}ms` }}
                 className="animate-fade-up flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
               >
-                <span className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setDetailTarget(s)}
+                  aria-label={`Lihat detail ${s.name}`}
+                  className="min-w-0 flex-1 rounded-md text-left"
+                >
                   <span className="flex items-center gap-2 truncate font-medium text-navy-900">
                     {s.name}
                     {s.status === "excluded" && <Badge tone="danger">Dikecualikan</Badge>}
@@ -217,7 +231,7 @@ export default function SuppliersPage() {
                       {s.excludedAt ? ` · ${formatDateTime(s.excludedAt)}` : ""}
                     </span>
                   )}
-                </span>
+                </button>
                 <span className="flex shrink-0 items-center gap-2">
                   <span
                     className={cn(
@@ -233,6 +247,9 @@ export default function SuppliersPage() {
                   <span className="tabular-nums font-semibold text-navy-900">
                     {s.reliabilityScore.toFixed(2)}
                   </span>
+                  <Button variant="ghost" onClick={() => setDetailTarget(s)}>
+                    Detail
+                  </Button>
                   {s.status === "active" && userCanApprove && (
                     <Button
                       variant="outline"
@@ -326,6 +343,16 @@ export default function SuppliersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SupplierDetailPanel
+        supplierId={detailTarget?.id ?? null}
+        open={detailTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailTarget(null);
+        }}
+        locationLabel={(id) => locationLabel(id, locations ?? [])}
+        commodityLabel={(id) => commodityLabel(id, commodities ?? [])}
+      />
     </div>
   );
 }

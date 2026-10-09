@@ -322,6 +322,61 @@ export interface Supplier {
   exclusionReason: string | null;
 }
 
+/** Satu batch yang dipasok sebuah pemasok (`batches`, Schema.md §2). */
+export interface SupplierBatch {
+  id: string;
+  commodityId: string;
+  locationId: string;
+  quantityKg: number;
+  harvestedAt: string;
+  /** Panen + masa layak komoditas (`core/shelf_life.py`) — kolomnya memang tidak ada di DB. */
+  usableUntil: string;
+  freshnessScore: number | null;
+  /** Pita dokumen (`core/freshness.py`) — kata yang sama dengan kolom kesegaran di halaman Pasokan. */
+  freshnessStatus: "fresh" | "approaching_expiry" | "expired" | null;
+  safetyStatus: SafetyStatus;
+  certificationStatus: "none" | "hygiene" | "haccp";
+  /** Jumlah titik log suhu yang tersimpan (`batches.temperature_log`). */
+  temperatureReadings: number;
+  temperatureExcursion: boolean;
+}
+
+/** Kuotasi harga dari pemasok (`price_signals` dengan source='supplier_quote'). */
+export interface SupplierPrice {
+  commodityId: string;
+  pricePerKg: number;
+  source: string;
+  recordedAt: string;
+}
+
+/** Purchase order SAP (mock) yang pernah diterbitkan ke pemasok ini. */
+export interface SupplierPurchaseOrder {
+  poNumber: string;
+  materialNumber: string;
+  orderedQuantityKg: number;
+  price: number;
+  status: "draft" | "submitted" | "confirmed";
+  decisionId: string | null;
+  createdAt: string;
+}
+
+/** Riwayat usulan eksklusi pemasok — termasuk yang belum atau tidak disetujui (Rules.md §1.2). */
+export interface SupplierExclusionDecision {
+  decisionId: string;
+  status: DecisionStatus;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** Detail satu pemasok (`GET /ui/suppliers/{id}`). */
+export interface SupplierDetail {
+  supplier: Supplier;
+  batches: SupplierBatch[];
+  priceSignals: SupplierPrice[];
+  purchaseOrders: SupplierPurchaseOrder[];
+  exclusionDecisions: SupplierExclusionDecision[];
+}
+
 /** Request body untuk login. */
 export interface LoginRequest {
   username: string;

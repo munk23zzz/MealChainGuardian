@@ -8,6 +8,7 @@ import {
   getDemand,
   getKpi,
   getLocations,
+  getSupplier,
   getSuppliers,
   getSupply,
 } from "@/lib/api";
@@ -77,5 +78,19 @@ export function useSuppliers() {
     queryKey: ["suppliers"],
     queryFn: getSuppliers,
     refetchInterval: POLL_INTERVAL,
+  });
+}
+
+/**
+ * Detail satu pemasok (`GET /ui/suppliers/{id}`), dipakai panel di halaman Pemasok.
+ *
+ * `enabled` dipakai supaya panel TIDAK memanggil backend sebelum ada pemasok yang dipilih —
+ * tanpa itu, membuka halaman Pemasok langsung memicu satu permintaan per baris.
+ */
+export function useSupplier(id: string | null) {
+  return useQuery({
+    queryKey: ["suppliers", id],
+    queryFn: () => getSupplier(id ?? ""),
+    enabled: id !== null,
   });
 }

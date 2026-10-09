@@ -176,6 +176,76 @@ class SupplierOut(BaseModel):
     exclusion_reason: str | None = Field(default=None, serialization_alias="exclusionReason")
 
 
+class SupplierBatchOut(BaseModel):
+    """Satu batch dari pemasok ini (`batches`, docs/Schema.md §2) — apa adanya dari baris tersimpan."""
+
+    id: str
+    commodity_id: str = Field(serialization_alias="commodityId")
+    location_id: str = Field(serialization_alias="locationId")
+    quantity_kg: float = Field(serialization_alias="quantityKg")
+    harvested_at: datetime = Field(serialization_alias="harvestedAt")
+    usable_until: datetime = Field(
+        serialization_alias="usableUntil",
+        description="panen + masa layak komoditas (core/shelf_life.py); kolomnya memang tidak ada di DB",
+    )
+    freshness_score: float | None = Field(default=None, serialization_alias="freshnessScore")
+    freshness_status: str | None = Field(
+        default=None,
+        serialization_alias="freshnessStatus",
+        description="pita dokumen fresh/approaching_expiry/expired (core/freshness.py), sama dengan /ui/supply",
+    )
+    safety_status: str = Field(serialization_alias="safetyStatus")
+    certification_status: str = Field(serialization_alias="certificationStatus")
+    temperature_readings: int = Field(
+        default=0, serialization_alias="temperatureReadings"
+    )
+    temperature_excursion: bool = Field(
+        default=False, serialization_alias="temperatureExcursion"
+    )
+
+
+class SupplierPriceOut(BaseModel):
+    """Kuotasi harga dari pemasok ini (`price_signals`, docs/Schema.md §2)."""
+
+    commodity_id: str = Field(serialization_alias="commodityId")
+    price_per_kg: float = Field(serialization_alias="pricePerKg")
+    source: str
+    recorded_at: datetime = Field(serialization_alias="recordedAt")
+
+
+class SupplierPurchaseOrderOut(BaseModel):
+    """Purchase order SAP (mock) yang pernah diterbitkan ke pemasok ini."""
+
+    po_number: str = Field(serialization_alias="poNumber")
+    material_number: str = Field(serialization_alias="materialNumber")
+    ordered_quantity_kg: float = Field(serialization_alias="orderedQuantityKg")
+    price: float
+    status: str
+    decision_id: str | None = Field(default=None, serialization_alias="decisionId")
+    created_at: datetime = Field(serialization_alias="createdAt")
+
+
+class SupplierExclusionDecisionOut(BaseModel):
+    """Riwayat usulan eksklusi pemasok ini (`decisions`, Rules.md §1.2) — termasuk yang ditolak."""
+
+    decision_id: str = Field(serialization_alias="decisionId")
+    status: str
+    reason: str | None = None
+    created_at: datetime = Field(serialization_alias="createdAt")
+
+
+class SupplierDetailOut(BaseModel):
+    """Detail satu pemasok — supaya UI tidak perlu membuka tabel lain per pemasok."""
+
+    supplier: SupplierOut
+    batches: list[SupplierBatchOut]
+    price_signals: list[SupplierPriceOut] = Field(serialization_alias="priceSignals")
+    purchase_orders: list[SupplierPurchaseOrderOut] = Field(serialization_alias="purchaseOrders")
+    exclusion_decisions: list[SupplierExclusionDecisionOut] = Field(
+        serialization_alias="exclusionDecisions"
+    )
+
+
 class CostCandidateOut(BaseModel):
     """`CandidateCostBreakdown` — diteruskan apa adanya dari `decisions.cost_breakdown`."""
 
@@ -647,18 +717,131 @@ def list_suppliers(session: SessionDep, _user: CurrentUser) -> list[SupplierOut]
     `decisions.outcome` (revisi dokumen 9 Okt), jadi nilainya statis dari seed.
     """
     rows = session.scalars(select(Supplier).order_by(Supplier.name)).all()
-    return [
-        SupplierOut(
-            id=str(row.id),
-            name=row.name,
-            location_id=str(row.location_id),
-            reliability_score=float(row.reliability_score),
-            status=row.status,
-            excluded_at=row.excluded_at,
-            exclusion_reason=row.exclusion_reason,
-        )
-        for row in rows
-    ]
+    return [_supplier_out(row) for row in rows]
+
+
+def _supplier_out(row: Supplier) -> SupplierOut:
+    """Serialisasi satu pemasok — dipakai daftar DAN detail supaya bentuknya tak bisa berbeda."""
+    return SupplierOut(
+        id=str(row.id),
+        name=row.name,
+        location_id=str(row.location_id),
+        reliability_score=float(row.reliability_score),
+        status=row.status,
+        excluded_at=row.excluded_at,
+        exclusion_reason=row.exclusion_reason,
+    )
+
+
+def _supplier_or_404(session: Session, supplier_id: str) -> Supplier:
+    """Pemasok dari id domain; id tak sah atau barisnya tidak ada = 404 biasa, bukan 500."""
+    try:
+        key = uuid.UUID(supplier_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404, detail=f"Pemasok {supplier_id!r} tidak ditemukan."
+        ) from None
+    row = session.get(Supplier, key)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Pemasok {supplier_id!r} tidak ditemukan.")
+    return row
+
+
+@router.get("/suppliers/{supplier_id}", response_model=SupplierDetailOut)
+def get_supplier_detail(
+    supplier_id: str, session: SessionDep, _user: CurrentUser
+) -> SupplierDetailOut:
+    """Detail satu pemasok: batch, kuotasi harga, purchase order, dan riwayat usulan eksklusi.
+
+    Yang ditampilkan hanya baris yang memang tersimpan — tidak ada angka yang diarang di lapisan
+    baca. Dua nilai turunan tetap jujur karena dihitung dari data, bukan ditebak: `usableUntil`
+    (`harvested_at` + masa layak komoditas, `core/shelf_life.py`) dan `freshnessStatus` (pita
+    dokumen, `core/freshness.py`) — dua-duanya sama dengan yang dipakai `/ui/supply`, jadi batch
+    yang sama tidak bisa tampil beda kesegaran di dua halaman.
+
+    Riwayat eksklusi sengaja memuat usulan yang DITOLAK juga: halaman ini tempat menilai pemasok,
+    dan menyembunyikan usulan yang gagal akan membuat riwayatnya terlihat lebih bersih dari kenyataan.
+    """
+    supplier = _supplier_or_404(session, supplier_id)
+
+    commodity_names = {str(row.id): row.name for row in session.scalars(select(Commodity)).all()}
+
+    batch_rows = session.scalars(
+        select(Batch)
+        .where(Batch.supplier_id == supplier.id)
+        .order_by(Batch.harvested_at.desc(), Batch.created_at.desc())
+    ).all()
+    price_rows = session.scalars(
+        select(PriceSignal)
+        .where(PriceSignal.supplier_id == supplier.id)
+        .order_by(PriceSignal.recorded_at.desc())
+    ).all()
+    po_rows = session.scalars(
+        select(SapMockPurchaseOrder)
+        .where(SapMockPurchaseOrder.supplier_id == supplier.id)
+        .order_by(SapMockPurchaseOrder.created_at.desc())
+    ).all()
+    exclusion_rows = session.scalars(
+        select(Decision)
+        .where(Decision.supplier_id == supplier.id)
+        .where(Decision.decision_type == "supplier_exclusion")
+        .order_by(Decision.created_at.desc())
+    ).all()
+
+    return SupplierDetailOut(
+        supplier=_supplier_out(supplier),
+        batches=[
+            SupplierBatchOut(
+                id=str(row.id),
+                commodity_id=str(row.commodity_id),
+                location_id=str(row.location_id),
+                quantity_kg=float(row.quantity_kg),
+                harvested_at=row.harvested_at,
+                usable_until=derive_usable_until(
+                    row.harvested_at, commodity_names.get(str(row.commodity_id))
+                ),
+                freshness_score=(
+                    float(row.freshness_score) if row.freshness_score is not None else None
+                ),
+                freshness_status=status_for_ui(freshness_band(row.freshness_score)),
+                safety_status=row.safety_status,
+                certification_status=row.certification_status,
+                temperature_readings=len(row.temperature_log or []),
+                temperature_excursion=has_temperature_excursion(row.temperature_log or []),
+            )
+            for row in batch_rows
+        ],
+        price_signals=[
+            SupplierPriceOut(
+                commodity_id=str(row.commodity_id),
+                price_per_kg=float(row.price_per_kg),
+                source=row.source,
+                recorded_at=row.recorded_at,
+            )
+            for row in price_rows
+        ],
+        purchase_orders=[
+            SupplierPurchaseOrderOut(
+                po_number=row.po_number,
+                material_number=row.material_number,
+                ordered_quantity_kg=float(row.ordered_quantity),
+                price=float(row.price),
+                status=row.status,
+                decision_id=str(row.decision_id) if row.decision_id else None,
+                created_at=row.created_at,
+            )
+            for row in po_rows
+        ],
+        exclusion_decisions=[
+            SupplierExclusionDecisionOut(
+                decision_id=str(row.id),
+                status=row.status,
+                reason=row.reason,
+                created_at=row.created_at,
+            )
+            for row in exclusion_rows
+        ],
+    )
 
 
 # --- Keputusan: bentuk `Recommendation` yang dibaca UI -----------------------------------------
