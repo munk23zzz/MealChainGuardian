@@ -16,7 +16,14 @@ from __future__ import annotations
 
 import pytest
 
-from api_support import JAKARTA_HEAD, MONITOR, approved_decision, propose, user_headers
+from api_support import (
+    JAKARTA_HEAD,
+    JAKARTA_NUTRI,
+    MONITOR,
+    approved_decision,
+    propose,
+    user_headers,
+)
 
 pytestmark = pytest.mark.usefixtures("client")
 
@@ -373,3 +380,111 @@ def test_kpi_explains_what_it_cannot_compute_yet(client):
     ):
         assert key not in kpi
         assert kpi["unavailable"][key]
+
+
+# --- Aksi dari UI (kontrak tulis versi UI) -----------------------------------------------------
+#
+# UI mengirim camelCase dan tanpa pemilih pemasok, sedangkan `/actions/*` domain menuntut
+# snake_case + `supplier` + `net_price_amount`. Yang diuji di sini: jalur UI bisa dipakai
+# ujung-ke-ujung TANPA melemahkan aturan domain (tidak ada auto-execute, penerimaan tetap hanya
+# boleh dicatat Ahli Gizi SPPG tujuan).
+
+
+def test_ui_approve_then_execute_creates_the_purchase_order(client):
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = propose(client, headers).json()["decision"]["id"]
+
+    approved = client.post(
+        "/ui/actions/approve", json={"decisionId": decision_id}, headers=headers
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["approvedAt"] is not None
+
+    executed = client.post(
+        "/ui/actions/execute", json={"decisionId": decision_id}, headers=headers
+    )
+    assert executed.status_code == 200, executed.text
+    body = executed.json()
+
+    assert body["status"] == "executed"
+    assert body["executedAt"] is not None
+    order = body["sapPurchaseOrder"]
+    assert order["poNumber"].startswith("4500")
+    assert order["orderedQuantityKg"] == 700.0
+    assert order["plant"] == "JK01"  # lokasi tujuan Jakarta
+
+
+def test_ui_execute_still_refuses_an_unapproved_decision(client):
+    """Jalur UI tidak boleh jadi pintu belakang `no_auto_execute` (Rules.md §1.2)."""
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = propose(client, headers).json()["decision"]["id"]
+
+    response = client.post(
+        "/ui/actions/execute", json={"decisionId": decision_id}, headers=headers
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "no_auto_execute"
+
+
+def test_ui_reject_records_the_reason(client):
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = propose(client, headers).json()["decision"]["id"]
+
+    response = client.post(
+        "/ui/actions/reject",
+        json={"decisionId": decision_id, "reason": "stok pasar masih cukup"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "rejected"
+    assert body["id"] == decision_id
+
+
+def test_ui_receive_records_the_inspection_and_feeds_learn(client):
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = propose(client, headers).json()["decision"]["id"]
+    client.post("/ui/actions/approve", json={"decisionId": decision_id}, headers=headers)
+    client.post("/ui/actions/execute", json={"decisionId": decision_id}, headers=headers)
+
+    nutri = user_headers(client, JAKARTA_NUTRI)
+    response = client.post(
+        "/ui/actions/receive",
+        json={"decisionId": decision_id, "measuredTempC": 4.0, "physicalCondition": "baik"},
+        headers=nutri,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "success"
+    assert body["affectsSupplierReliability"] is False
+    assert body["evidenceId"]
+    assert body["decision"]["status"] == "executed"
+
+
+def test_ui_receive_keeps_the_nutritionist_only_rule(client, supplier_id):
+    """Aturan peran penerimaan ditegakkan backend, bukan cuma disembunyikan di UI."""
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = approved_decision(client, headers, supplier_id)
+
+    response = client.post(
+        "/ui/actions/receive",
+        json={"decisionId": decision_id, "measuredTempC": 4.0, "physicalCondition": "baik"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "recorder_role_not_allowed"
+
+
+def test_ui_write_endpoints_require_a_token(client):
+    for path, body in (
+        ("/ui/actions/approve", {"decisionId": "x"}),
+        ("/ui/actions/reject", {"decisionId": "x", "reason": "x"}),
+        ("/ui/actions/execute", {"decisionId": "x"}),
+        ("/ui/actions/receive", {"decisionId": "x", "physicalCondition": "baik"}),
+    ):
+        assert client.post(path, json=body).status_code == 401, path

@@ -185,7 +185,7 @@ export function approveDecision(id: string): Promise<Recommendation> {
     };
     return mockDelay({ ...mockDecisions[idx] });
   }
-  return request<Recommendation>("/actions/approve", {
+  return request<Recommendation>("/ui/actions/approve", {
     method: "POST",
     body: JSON.stringify({ decisionId: id }),
   });
@@ -212,7 +212,7 @@ export function executeDecision(id: string): Promise<Recommendation> {
     };
     return mockDelay({ ...mockDecisions[idx] });
   }
-  return request<Recommendation>("/actions/execute", {
+  return request<Recommendation>("/ui/actions/execute", {
     method: "POST",
     body: JSON.stringify({ decisionId: id }),
   });
@@ -229,7 +229,7 @@ export function rejectDecision(id: string, reason: string): Promise<Recommendati
     };
     return mockDelay({ ...mockDecisions[idx] });
   }
-  return request<Recommendation>("/actions/reject", {
+  return request<Recommendation>("/ui/actions/reject", {
     method: "POST",
     body: JSON.stringify({ decisionId: id, reason }),
   });
@@ -350,7 +350,7 @@ export function submitReceivingInspection(
     });
   }
 
-  return request<ReceivingInspectionResult>("/actions/receive", {
+  return request<ReceivingInspectionResult>("/ui/actions/receive", {
     method: "POST",
     body: JSON.stringify(payload),
   });

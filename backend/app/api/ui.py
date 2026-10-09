@@ -22,9 +22,9 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,9 +50,20 @@ from app.models import (
     SapMockPurchaseOrder,
     Supplier,
 )
+from app.api.actions import (
+    ApproveRequest,
+    ExecuteRequest,
+    ReceiveRequest,
+    approve,
+    execute,
+    get_decision_or_404,
+    receive,
+)
+from app.api.supply import get_provider
 from app.core.kpi import DecisionFact, PriceFact, compute_kpi
 from app.core.learn import DeliveryEvent, replay_reliability
 from app.sap_integration.field_mapping import PLANT_CODE_BY_LOCATION
+from app.sap_integration.provider_interface import SAPDataProvider
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
@@ -1083,4 +1094,182 @@ def get_supplier_history(
             )
             for decision, _, at, note in deliveries
         ],
+    )
+
+
+# --- Aksi dari UI: kontrak tulis versi UI ------------------------------------------------------
+#
+# Kenapa ada jalur tulis terpisah: UI mengirim camelCase dan tanpa pemilih pemasok (`{decisionId}`
+# saja), sedangkan `/actions/*` domain memakai snake_case dan menuntut `supplier` +
+# `net_price_amount`. Endpoint di bawah meneruskan ke fungsi domain yang SAMA (aturan approval dan
+# aturan penerimaan tidak diduplikasi), jadi `openapi.json` domain tetap utuh untuk AgentCore
+# Gateway dan tidak ada dua sumber aturan.
+
+
+class UiDecisionRequest(BaseModel):
+    """Body minimal UI: hanya id keputusan (dipakai approve/execute)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    decision_id: str = Field(alias="decisionId")
+
+
+class UiRejectRequest(UiDecisionRequest):
+    """Penolakan = satu suara `approved=False` + alasan sebagai komentar audit."""
+
+    reason: str | None = None
+
+
+class UiReceiveRequest(UiDecisionRequest):
+    measured_temp_c: Decimal | None = Field(default=None, alias="measuredTempC")
+    physical_condition: Literal["baik", "rusak_sebagian", "rusak"] = Field(
+        alias="physicalCondition"
+    )
+    note: str | None = None
+
+
+class ReceivingInspectionOut(BaseModel):
+    """`ReceivingInspectionResult` di `frontend/lib/api/schema.d.ts`."""
+
+    decision: RecommendationOut
+    evidence_id: str = Field(serialization_alias="evidenceId")
+    outcome: str
+    affects_supplier_reliability: bool = Field(serialization_alias="affectsSupplierReliability")
+
+
+def _execute_defaults(session: Session, decision: Decision) -> tuple[str, Decimal]:
+    """Pemasok + harga total PO untuk jalur UI — keduanya diambil dari data nyata.
+
+    UI tidak punya pemilih pemasok di kartu eksekusi (mock memang tidak pernah memilih), jadi
+    jalur ini memakai aturan yang jelas dan bisa diperiksa:
+
+    * pemasok = skor kepercayaan TERTINGGI di lokasi asal keputusan; kalau tidak ada pemasok di
+      sana, tertinggi keseluruhan;
+    * harga total = harga terbaru komoditas itu di lokasi asal x kuantitas keputusan; kalau belum
+      ada sinyal harga, pakai `safe_delivered_cost` keputusan apa adanya.
+
+    Ini bukan pemilihan ala agen (Safe Delivered Cost per kandidat, S3-03) — itu belum ada, dan
+    angka contoh tidak boleh dikarang. Yang dipakai di sini semuanya baris yang memang tersimpan.
+    """
+    supplier = session.scalar(
+        select(Supplier)
+        .where(Supplier.location_id == decision.source_location_id)
+        .order_by(Supplier.reliability_score.desc(), Supplier.name)
+    )
+    if supplier is None:
+        supplier = session.scalar(
+            select(Supplier).order_by(Supplier.reliability_score.desc(), Supplier.name)
+        )
+    if supplier is None:
+        raise HTTPException(
+            status_code=409, detail="Belum ada pemasok di basis data, jadi PO tidak bisa dibuat."
+        )
+
+    price = session.scalar(
+        select(PriceSignal.price_per_kg)
+        .where(PriceSignal.location_id == decision.source_location_id)
+        .where(PriceSignal.commodity_id == decision.commodity_id)
+        .order_by(PriceSignal.recorded_at.desc())
+    )
+    quantity = _decimal(decision.quantity_kg or 0)
+    if price is not None and quantity > 0:
+        total = (_decimal(price) * quantity).quantize(Decimal("0.01"))
+    elif decision.safe_delivered_cost is not None:
+        total = _decimal(decision.safe_delivered_cost)
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Harga pasokan dan safe delivered cost keputusan ini belum ada, "
+                "jadi nilai PO tidak bisa ditentukan."
+            ),
+        )
+
+    if total <= 0:
+        raise HTTPException(status_code=409, detail=f"Nilai PO tidak masuk akal: {total}.")
+    return str(supplier.id), total
+
+
+@router.post("/actions/approve", response_model=RecommendationOut)
+def ui_approve(
+    payload: UiDecisionRequest, session: SessionDep, user: CurrentUser
+) -> RecommendationOut:
+    """Setujui keputusan dari UI; aturan approval tetap milik `core/approval_rules.py`."""
+    approve(ApproveRequest(decision_id=payload.decision_id, approved=True), session, user)
+    return build_recommendation(
+        session, get_decision_or_404(session, payload.decision_id), _now()
+    )
+
+
+@router.post("/actions/reject", response_model=RecommendationOut)
+def ui_reject(
+    payload: UiRejectRequest, session: SessionDep, user: CurrentUser
+) -> RecommendationOut:
+    """Tolak keputusan dari UI — satu suara `approved=False`, alasan disimpan sebagai komentar."""
+    approve(
+        ApproveRequest(
+            decision_id=payload.decision_id, approved=False, comment=payload.reason
+        ),
+        session,
+        user,
+    )
+    return build_recommendation(
+        session, get_decision_or_404(session, payload.decision_id), _now()
+    )
+
+
+@router.post("/actions/execute", response_model=RecommendationOut)
+def ui_execute(
+    payload: UiDecisionRequest,
+    session: SessionDep,
+    user: CurrentUser,
+    provider: Annotated[SAPDataProvider, Depends(get_provider)],
+) -> RecommendationOut:
+    """Eksekusi keputusan dari UI; pemasok & nilai PO diambil `_execute_defaults`."""
+    decision = get_decision_or_404(session, payload.decision_id)
+    supplier, net_price = _execute_defaults(session, decision)
+    execute(
+        ExecuteRequest(
+            decision_id=payload.decision_id, supplier=supplier, net_price_amount=net_price
+        ),
+        session,
+        user,
+        provider,
+    )
+    return build_recommendation(
+        session, get_decision_or_404(session, payload.decision_id), _now()
+    )
+
+
+@router.post("/actions/receive", response_model=ReceivingInspectionOut)
+def ui_receive(
+    payload: UiReceiveRequest,
+    session: SessionDep,
+    user: CurrentUser,
+    provider: Annotated[SAPDataProvider, Depends(get_provider)],
+) -> ReceivingInspectionOut:
+    """Catat penerimaan dari UI; aturan siapa/kapan boleh mencatat tetap di `core/receiving_rules.py`."""
+    response = receive(
+        ReceiveRequest(
+            decision_id=payload.decision_id,
+            physical_condition=payload.physical_condition,
+            measured_temperature_c=payload.measured_temp_c,
+            notes=payload.note,
+        ),
+        session,
+        user,
+        provider,
+    )
+    decision = get_decision_or_404(session, payload.decision_id)
+    evidence = session.scalar(
+        select(DecisionEvidence)
+        .where(DecisionEvidence.decision_id == decision.id)
+        .where(DecisionEvidence.evidence_type == "human_inspection")
+        .order_by(DecisionEvidence.recorded_at.desc())
+    )
+    return ReceivingInspectionOut(
+        decision=build_recommendation(session, decision, _now()),
+        evidence_id=str(evidence.id) if evidence is not None else "",
+        outcome=response.outcome,
+        affects_supplier_reliability=response.outcome == "failure",
     )
