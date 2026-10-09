@@ -31,7 +31,10 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/agent-log", label: "Agent Log" },
   { href: "/quality", label: "Kualitas Agen" },
   { href: "/kpi", label: "KPI" },
-  { href: "/sources", label: "Sumber Data" },
+  // `Sumber Data` (/sources) SENGAJA tidak ada di daftar ini (keputusan Roy, 9 Okt 2026): halamannya
+  // tetap hidup dan bisa dibuka langsung di /sources, tetapi tidak ditampilkan di sidebar maupun
+  // command palette. Kalau perlu dimunculkan lagi, cukup tambahkan kembali entri di sini — ikonnya
+  // sudah ada di `components/sidebar/sidebar.tsx` dan tes penjaganya ada di `lib/commands.test.ts`.
 ];
 
 export function visibleNavItems(role: Role | null | undefined): NavItem[] {

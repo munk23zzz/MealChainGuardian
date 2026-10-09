@@ -22,6 +22,16 @@ describe("nav", () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
+  it("Sumber Data sengaja TIDAK di navigasi (keputusan Roy, 9 Okt 2026)", () => {
+    // Halaman /sources tetap ada dan bisa dibuka langsung; yang dimatikan hanya tampilannya di
+    // sidebar + command palette. Tes ini yang mengunci keputusan itu supaya tidak "dikembalikan"
+    // diam-diam oleh perubahan berikutnya.
+    expect(NAV_ITEMS.map((i) => i.href)).not.toContain("/sources");
+    for (const role of ["sppg_head", "sppg_nutritionist", "bgn_monitor"] as Role[]) {
+      expect(visibleNavItems(role).map((i) => i.href)).not.toContain("/sources");
+    }
+  });
+
   it("halaman selalu aktif untuk sub-route", () => {
     expect(isNavActive("/decisions/dec-001", "/decisions")).toBe(true);
     expect(isNavActive("/decisions", "/decisions")).toBe(true);
