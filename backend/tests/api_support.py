@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
-
-from app.models import User
+from app.db_seed import DEMO_PASSWORD_BY_ROLE, DEMO_USERS
 
 JAKARTA_HEAD = "kepala.jakarta@demo.local"
 JAKARTA_NUTRI = "gizi.jakarta@demo.local"
@@ -18,13 +16,38 @@ CIANJUR_HEAD = "kepala.cianjur@demo.local"
 CIANJUR_NUTRI = "gizi.cianjur@demo.local"
 MONITOR = "monitor1@demo.local"
 
+# Satu sumber kebenaran password demo: peta peran di app/db_seed.py.
+DEMO_PASSWORD_BY_EMAIL = {
+    spec["email"]: DEMO_PASSWORD_BY_ROLE[spec["role"]] for spec in DEMO_USERS
+}
 
-def user_headers(db_factory, email: str) -> dict[str, str]:
-    """Header `X-User-Id` untuk satu akun demo (lihat deviasi #9: identitas belum diautentikasi)."""
-    with db_factory() as session:
-        user_id = session.scalar(select(User.id).where(User.email == email))
-    assert user_id is not None, f"akun demo {email} tidak ada di seed"
-    return {"X-User-Id": str(user_id)}
+
+# Cache token DIPASANG pada objek TestClient (bukan di modul): fixture `client` membuat database test
+# dan TestClient baru per test, jadi id akun demo berubah-ubah dan token lama akan ditolak 401.
+def user_headers(client, email: str, *, password: str | None = None) -> dict[str, str]:
+    """Header `Authorization: Bearer <token>` untuk satu akun demo.
+
+    Token diambil lewat jalur login yang SAMA dengan UI (`POST /auth/login`), bukan dibuat langsung
+    oleh test: kalau login atau tanda tangan token rusak, seluruh test API ikut gagal — itu yang
+    diinginkan. Sebelumnya test mengirim header `X-User-Id` yang tidak diverifikasi (deviasi #9).
+
+    `password` hanya perlu diisi untuk akun yang dibuat langsung oleh test (bukan hasil seed).
+    """
+    cache = client.__dict__.setdefault("_demo_token_cache", {})
+    key = f"{email}:{password or ''}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    if password is None:
+        password = DEMO_PASSWORD_BY_EMAIL.get(email)
+        assert password is not None, f"{email} bukan akun demo yang di-seed"
+    response = client.post("/auth/login", json={"username": email, "password": password})
+    assert response.status_code == 200, response.text
+
+    headers = {"Authorization": f"Bearer {response.json()['token']}"}
+    cache[key] = headers
+    return headers
 
 
 def propose(client, headers, **overrides: Any):

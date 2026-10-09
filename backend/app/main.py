@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import actions, decisions, supply
+from app.api import actions, auth, decisions, supply
 from app.sap_integration.factory import get_sap_provider
 from app.sap_integration.mapping import UnmappedSapValueError
 from app.sap_integration.provider_interface import SAPProviderError
@@ -18,6 +18,7 @@ from app.sap_integration.provider_interface import SAPProviderError
 app = FastAPI(title="MealChain Guardian — backend", version="0.1.0")
 
 app.include_router(supply.router)
+app.include_router(auth.router)
 app.include_router(decisions.router)
 app.include_router(actions.router)
 

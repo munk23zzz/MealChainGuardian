@@ -8,6 +8,8 @@ from typing import Annotated, Iterator
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import secret_key
+from app.core.auth import InvalidTokenError, read_token
 from app.db import get_session_factory
 from app.models import User
 
@@ -23,31 +25,50 @@ SessionDep = Annotated[Session, Depends(get_session)]
 
 def get_current_user(
     session: SessionDep,
-    x_user_id: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> User:
-    """Identitas pemanggil dari header `X-User-Id`.
+    """Identitas pemanggil dari `Authorization: Bearer <token>`.
 
-    Ini mekanisme ANTARA untuk demo, bukan autentikasi: identitas belum diverifikasi (tidak ada
-    password/token), jadi nilainya hanya sekuat header. Yang tidak ditawar dan tetap di server:
-    penegakan peran — siapa yang boleh approve apa (`docs/Skill.md` §9) — bukan di UI.
-    Autentikasi sungguhan menyusul bersama frontend (P2.2d).
+    Token dibuat `POST /auth/login` (JWT HS256, `app/core/auth.py`) dan WAJIB bertanda tangan sah
+    serta belum kedaluwarsa. Sebelumnya identitas datang dari header `X-User-Id` yang tidak
+    diverifikasi (deviasi #9) — jalur itu sudah dihapus supaya tidak ada cara menyamar.
+
+    Yang tetap ditegakkan di lapisan ini juga: peran & lokasi approver (`docs/Skill.md` §9), bukan di UI.
     """
-    if not x_user_id:
+    if not authorization:
         raise HTTPException(
             status_code=401,
-            detail="Header X-User-Id wajib diisi dengan id akun demo (lihat app/db_seed.py).",
+            detail="Header `Authorization: Bearer <token>` wajib diisi. Token didapat dari POST /auth/login.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=401, detail="Format header Authorization harus `Bearer <token>`."
+        )
+
     try:
-        user_id = uuid.UUID(x_user_id)
+        claims = read_token(token.strip(), secret=secret_key())
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Token tidak sah: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+
+    try:
+        user_id = uuid.UUID(claims.user_id)
     except ValueError:
         raise HTTPException(
-            status_code=401, detail=f"X-User-Id bukan UUID: {x_user_id!r}"
+            status_code=401, detail=f"Token memuat id akun yang bukan UUID: {claims.user_id!r}"
         ) from None
 
     user = session.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=401, detail=f"Akun demo tidak dikenal: {user_id}")
-
+        raise HTTPException(
+            status_code=401, detail=f"Akun di dalam token sudah tidak ada: {claims.user_id}"
+        )
     return user
 
 

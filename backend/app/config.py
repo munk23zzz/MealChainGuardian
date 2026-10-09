@@ -35,3 +35,18 @@ def mock_store_kind() -> str:
     menyalakan `postgres` untuk kerja sehari-hari.
     """
     return os.environ.get("SAP_MOCK_STORE", "").strip().lower() or DEFAULT_MOCK_STORE
+
+
+# Nilai cadangan HANYA untuk pengembangan lokal: token demo jadi bisa dipalsukan siapa pun yang tahu
+# nilai ini. Di lingkungan lomba/produksi, set APP_SECRET_KEY di `.env` (dan jangan commit nilainya).
+DEV_SECRET_KEY = "dev-secret-mealchain-ubah-di-env"
+
+
+def secret_key() -> str:
+    """Kunci tanda tangan token demo. Diisi dari env `APP_SECRET_KEY`."""
+    return os.environ.get("APP_SECRET_KEY", "").strip() or DEV_SECRET_KEY
+
+
+def using_dev_secret() -> bool:
+    """True kalau kunci tanda tangan masih nilai pengembangan (dipakai untuk peringatan di /health)."""
+    return secret_key() == DEV_SECRET_KEY

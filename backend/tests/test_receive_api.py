@@ -33,7 +33,7 @@ def _score(db_factory, supplier_id: str) -> Decimal:
 
 def _executed_decision(client, db_factory, supplier_id: str) -> str:
     """Keputusan yang sudah dieksekusi — syarat barang bisa diterima."""
-    return approved_decision(client, _headers(db_factory, JAKARTA_HEAD), supplier_id)
+    return approved_decision(client, _headers(client, JAKARTA_HEAD), supplier_id)
 
 
 # --- jalur bahagia dan jalur gagal -----------------------------------------------------
@@ -41,7 +41,7 @@ def _executed_decision(client, db_factory, supplier_id: str) -> str:
 
 def test_successful_receipt_records_evidence_outcome_and_learn_trace(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
-    headers = _headers(db_factory, JAKARTA_NUTRI)
+    headers = _headers(client, JAKARTA_NUTRI)
     before = _score(db_factory, supplier_id)
 
     response = receive(
@@ -95,7 +95,7 @@ def test_failed_receipt_lowers_supplier_score(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
 
     response = receive(
-        client, _headers(db_factory, JAKARTA_NUTRI), decision_id, condition="rusak", notes="sebagian pecah"
+        client, _headers(client, JAKARTA_NUTRI), decision_id, condition="rusak", notes="sebagian pecah"
     )
 
     assert response.status_code == 200, response.text
@@ -109,7 +109,7 @@ def test_failed_receipt_lowers_supplier_score(client, db_factory, supplier_id):
 def test_history_is_used_so_a_second_failure_compounds(client, db_factory, supplier_id):
     """LEARN memakai histori, bukan hanya kejadian terakhir (docs/Skill.md §10)."""
     first = _executed_decision(client, db_factory, supplier_id)
-    headers = _headers(db_factory, JAKARTA_NUTRI)
+    headers = _headers(client, JAKARTA_NUTRI)
     assert receive(client, headers, first, condition="rusak").json()["supplier_score"][
         "reliability_score_after"
     ] == 0.40
@@ -126,7 +126,7 @@ def test_history_is_used_so_a_second_failure_compounds(client, db_factory, suppl
 def test_success_after_failure_raises_the_score_again(client, db_factory, supplier_id):
     """Skor bisa naik lagi — kalau LEARN hanya jalan saat gagal, angkanya tidak akan pernah pulih."""
     first = _executed_decision(client, db_factory, supplier_id)
-    headers = _headers(db_factory, JAKARTA_NUTRI)
+    headers = _headers(client, JAKARTA_NUTRI)
     assert receive(client, headers, first, condition="rusak").json()["outcome"] == "failure"
 
     second = _executed_decision(client, db_factory, supplier_id)
@@ -143,7 +143,7 @@ def test_success_after_failure_raises_the_score_again(client, db_factory, suppli
 def test_head_of_sppg_cannot_record_the_inspection(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
 
-    response = receive(client, _headers(db_factory, JAKARTA_HEAD), decision_id)
+    response = receive(client, _headers(client, JAKARTA_HEAD), decision_id)
 
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "recorder_role_not_allowed"
@@ -152,7 +152,7 @@ def test_head_of_sppg_cannot_record_the_inspection(client, db_factory, supplier_
 def test_bgn_monitor_cannot_record_the_inspection(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
 
-    response = receive(client, _headers(db_factory, MONITOR), decision_id)
+    response = receive(client, _headers(client, MONITOR), decision_id)
 
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "recorder_role_not_allowed"
@@ -161,7 +161,7 @@ def test_bgn_monitor_cannot_record_the_inspection(client, db_factory, supplier_i
 def test_nutritionist_from_another_sppg_cannot_record(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
 
-    response = receive(client, _headers(db_factory, CIANJUR_NUTRI), decision_id)
+    response = receive(client, _headers(client, CIANJUR_NUTRI), decision_id)
 
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "recorder_location_mismatch"
@@ -174,11 +174,11 @@ def test_receipt_before_execution_is_refused(client, db_factory, supplier_id):
     """Approved saja belum cukup: barang belum dipesan, jadi belum ada yang diterima."""
     from api_support import approve, propose
 
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
 
-    response = receive(client, _headers(db_factory, JAKARTA_NUTRI), decision_id)
+    response = receive(client, _headers(client, JAKARTA_NUTRI), decision_id)
 
     assert response.status_code == 409
     assert response.json()["detail"]["error"] == "decision_not_executed"
@@ -186,7 +186,7 @@ def test_receipt_before_execution_is_refused(client, db_factory, supplier_id):
 
 def test_decision_cannot_be_received_twice(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
-    headers = _headers(db_factory, JAKARTA_NUTRI)
+    headers = _headers(client, JAKARTA_NUTRI)
     assert receive(client, headers, decision_id).status_code == 200
 
     again = receive(client, headers, decision_id)
@@ -202,7 +202,7 @@ def test_decision_cannot_be_received_twice(client, db_factory, supplier_id):
 def test_unknown_condition_is_refused_before_touching_the_database(client, db_factory, supplier_id):
     decision_id = _executed_decision(client, db_factory, supplier_id)
 
-    response = receive(client, _headers(db_factory, JAKARTA_NUTRI), decision_id, condition="lumayan")
+    response = receive(client, _headers(client, JAKARTA_NUTRI), decision_id, condition="lumayan")
 
     # Kondisinya bertipe Literal di skema, jadi FastAPI yang menolak lebih dulu (422) — dan itu
     # memang yang diinginkan: nilai tak dikenal tidak pernah sampai ke database.

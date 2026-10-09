@@ -26,6 +26,7 @@ from api_support import (
     propose,
     user_headers as _headers,
 )
+from app.db_seed import DEMO_PASSWORD_BY_ROLE, demo_password_hash
 from app.models import AgentTrace, Approval, Decision, DecisionEvidence, SapMockPurchaseOrder, User
 
 
@@ -33,7 +34,7 @@ from app.models import AgentTrace, Approval, Decision, DecisionEvidence, SapMock
 
 
 def test_propose_records_decision_and_shows_up_in_read_endpoint(client, db_factory):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
 
     response = propose(client, headers)
 
@@ -58,7 +59,7 @@ def test_propose_records_decision_and_shows_up_in_read_endpoint(client, db_facto
 
 
 def test_propose_without_verifier_result_is_not_approvable(client, db_factory):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
 
     decision = propose(client, headers, verifier_result=None).json()["decision"]
     assert decision["status"] == "proposed"
@@ -71,7 +72,7 @@ def test_propose_without_verifier_result_is_not_approvable(client, db_factory):
 
 
 def test_propose_rejects_unknown_location(client, db_factory):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
 
     response = propose(client, headers, target_location="Bandung")
 
@@ -92,32 +93,32 @@ def test_actions_require_an_identity(client, db_factory):
     )
 
     assert response.status_code == 401
-    assert "X-User-Id" in response.json()["detail"]
+    assert "Authorization" in response.json()["detail"]
 
 
 # --- approve: siapa yang sah ----------------------------------------------------------
 
 
 def test_bgn_monitor_cannot_approve(client, db_factory):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD)).json()["decision"]
+    decision = propose(client, _headers(client, JAKARTA_HEAD)).json()["decision"]
 
-    response = approve(client, _headers(db_factory, MONITOR), decision["id"])
+    response = approve(client, _headers(client, MONITOR), decision["id"])
 
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "approver_role_not_allowed"
 
 
 def test_approver_from_another_sppg_is_rejected(client, db_factory):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD)).json()["decision"]
+    decision = propose(client, _headers(client, JAKARTA_HEAD)).json()["decision"]
 
-    response = approve(client, _headers(db_factory, CIANJUR_HEAD), decision["id"])
+    response = approve(client, _headers(client, CIANJUR_HEAD), decision["id"])
 
     assert response.status_code == 403
     assert response.json()["detail"]["error"] == "approver_location_mismatch"
 
 
 def test_same_person_cannot_approve_twice(client, db_factory):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision = propose(client, headers).json()["decision"]
 
     assert approve(client, headers, decision["id"]).status_code == 200
@@ -133,7 +134,7 @@ def test_unique_index_blocks_a_second_vote_from_the_same_person_in_the_database(
     """Aturan yang sama juga ditegakkan database, bukan hanya kode Python (defense in depth)."""
     from sqlalchemy.exc import IntegrityError
 
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
 
@@ -155,9 +156,9 @@ def test_unique_index_blocks_a_second_vote_from_the_same_person_in_the_database(
 
 
 def test_one_approval_is_enough_when_verifier_is_consistent(client, db_factory):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD)).json()["decision"]
+    decision = propose(client, _headers(client, JAKARTA_HEAD)).json()["decision"]
 
-    response = approve(client, _headers(db_factory, JAKARTA_HEAD), decision["id"])
+    response = approve(client, _headers(client, JAKARTA_HEAD), decision["id"])
 
     assert response.status_code == 200, response.text
     assert response.json()["decision"]["status"] == "approved"
@@ -170,16 +171,16 @@ def test_one_approval_is_enough_when_verifier_is_consistent(client, db_factory):
 
 
 def test_flagged_decision_needs_head_and_nutritionist(client, db_factory):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD), verifier_result="flagged").json()[
+    decision = propose(client, _headers(client, JAKARTA_HEAD), verifier_result="flagged").json()[
         "decision"
     ]
 
-    first = approve(client, _headers(db_factory, JAKARTA_HEAD), decision["id"])
+    first = approve(client, _headers(client, JAKARTA_HEAD), decision["id"])
     assert first.status_code == 200
     assert first.json()["decision"]["status"] == "verifier_flagged"
     assert first.json()["decision"]["missing_approval_roles"] == ["sppg_nutritionist"]
 
-    second = approve(client, _headers(db_factory, JAKARTA_NUTRI), decision["id"])
+    second = approve(client, _headers(client, JAKARTA_NUTRI), decision["id"])
     assert second.status_code == 200
     assert second.json()["decision"]["status"] == "approved"
 
@@ -187,7 +188,7 @@ def test_flagged_decision_needs_head_and_nutritionist(client, db_factory):
 def test_two_heads_do_not_satisfy_a_flagged_decision(client, db_factory):
     """Dua orang berbeda berperan sama bukan dua approval yang diminta dokumen."""
     decision_id = propose(
-        client, _headers(db_factory, JAKARTA_HEAD), verifier_result="flagged"
+        client, _headers(client, JAKARTA_HEAD), verifier_result="flagged"
     ).json()["decision"]["id"]
 
     with db_factory() as session:
@@ -195,15 +196,19 @@ def test_two_heads_do_not_satisfy_a_flagged_decision(client, db_factory):
             User(
                 name="Kepala SPPG Jakarta (cadangan)",
                 email="kepala2.jakarta@demo.local",
-                password_hash="!dev-placeholder-bukan-kredensial",
+                password_hash=demo_password_hash("sppg_head"),
                 role="sppg_head",
                 location_id=session.scalar(select(User.location_id).where(User.email == JAKARTA_HEAD)),
             )
         )
         session.commit()
 
-    assert approve(client, _headers(db_factory, JAKARTA_HEAD), decision_id).status_code == 200
-    second = approve(client, _headers(db_factory, "kepala2.jakarta@demo.local"), decision_id)
+    assert approve(client, _headers(client, JAKARTA_HEAD), decision_id).status_code == 200
+    second = approve(
+        client,
+        _headers(client, "kepala2.jakarta@demo.local", password=DEMO_PASSWORD_BY_ROLE["sppg_head"]),
+        decision_id,
+    )
 
     assert second.status_code == 200
     assert second.json()["decision"]["status"] == "verifier_flagged"
@@ -211,12 +216,12 @@ def test_two_heads_do_not_satisfy_a_flagged_decision(client, db_factory):
 
 
 def test_rejection_rejects_the_decision_immediately(client, db_factory):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD), verifier_result="flagged").json()[
+    decision = propose(client, _headers(client, JAKARTA_HEAD), verifier_result="flagged").json()[
         "decision"
     ]
 
     response = approve(
-        client, _headers(db_factory, JAKARTA_NUTRI), decision["id"], approved=False, comment="stok meragukan"
+        client, _headers(client, JAKARTA_NUTRI), decision["id"], approved=False, comment="stok meragukan"
     )
 
     assert response.status_code == 200
@@ -228,9 +233,9 @@ def test_rejection_rejects_the_decision_immediately(client, db_factory):
 
 
 def test_execute_without_approval_is_refused(client, db_factory, supplier_id):
-    decision = propose(client, _headers(db_factory, JAKARTA_HEAD)).json()["decision"]
+    decision = propose(client, _headers(client, JAKARTA_HEAD)).json()["decision"]
 
-    response = execute(client, _headers(db_factory, JAKARTA_HEAD), decision["id"], supplier_id)
+    response = execute(client, _headers(client, JAKARTA_HEAD), decision["id"], supplier_id)
 
     assert response.status_code == 409
     body = response.json()["detail"]
@@ -240,9 +245,9 @@ def test_execute_without_approval_is_refused(client, db_factory, supplier_id):
 
 
 def test_execute_after_approval_creates_purchase_order_and_trace(client, db_factory, supplier_id):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
-    assert approve(client, _headers(db_factory, JAKARTA_NUTRI), decision_id).status_code == 200
+    assert approve(client, _headers(client, JAKARTA_NUTRI), decision_id).status_code == 200
 
     response = execute(client, headers, decision_id, supplier_id)
 
@@ -279,7 +284,7 @@ def test_execute_after_approval_creates_purchase_order_and_trace(client, db_fact
 
 
 def test_execute_twice_does_not_create_a_second_purchase_order(client, db_factory, supplier_id):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
     assert execute(client, headers, decision_id, supplier_id).status_code == 200
@@ -294,7 +299,7 @@ def test_execute_twice_does_not_create_a_second_purchase_order(client, db_factor
 
 
 def test_execute_rejects_unknown_supplier(client, db_factory, supplier_id):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
 
@@ -308,7 +313,7 @@ def test_execute_rejects_unknown_supplier(client, db_factory, supplier_id):
 
 
 def test_expired_decision_cannot_be_approved_or_executed(client, db_factory, supplier_id):
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     decision_id = propose(client, headers, expires_at=past).json()["decision"]["id"]
 
@@ -337,7 +342,7 @@ def test_execute_is_atomic_when_something_fails_after_the_purchase_order(
     request dan hanya ada SATU commit di akhir, pemeriksaan dari session lain di bawah ini tidak
     boleh melihat apa pun.
     """
-    headers = _headers(db_factory, JAKARTA_HEAD)
+    headers = _headers(client, JAKARTA_HEAD)
     decision_id = propose(client, headers).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
 
