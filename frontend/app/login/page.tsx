@@ -18,18 +18,6 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-/** Rantai agent (Architecture.md §1) — penanda produk di panel kiri. */
-const AGENT_CHAIN = [
-  "DETECT",
-  "VERIFY",
-  "TRACE",
-  "PREDICT",
-  "OPTIMIZE",
-  "DECIDE",
-  "ACT",
-  "LEARN",
-];
-
 /**
  * Akun demo: satu klik, tanpa mengetik — penting saat demo ke juri. Daftarnya tinggal di
  * `lib/demo-accounts.ts` supaya email di UI, mock, dan seed backend tidak bisa menyimpang.
@@ -83,37 +71,14 @@ export default function LoginPage() {
       {/* Panel produk: konteks dulu, form kemudian. */}
       <aside className="relative flex flex-col justify-between gap-8 overflow-hidden bg-brand px-8 py-10 text-white lg:w-[46%] lg:px-12 lg:py-14">
         <div>
-          <p className="flex items-center gap-2 text-sm font-medium text-white/85">
-            <ShieldCheck className="h-4 w-4" aria-hidden />
+          <h2 className="flex items-center gap-2.5 text-2xl font-semibold leading-tight lg:text-3xl">
+            <ShieldCheck className="h-6 w-6 shrink-0" aria-hidden />
             MealChain Guardian
-          </p>
-          <h2 className="mt-5 text-2xl font-semibold leading-tight lg:text-3xl">
-            Rantai pasokan pangan institusional yang bisa dipertanggungjawabkan.
           </h2>
           <p className="mt-3 max-w-md text-white/85">
-            Tiap keputusan punya bukti, batas waktu, dan jejak audit — dari deteksi
-            defisit sampai penyesuaian skor pemasok.
+            Rantai pasokan pangan yang bisa dipertanggungjawabkan.
           </p>
-
-          <ol className="mt-8 flex flex-wrap gap-2" aria-label="Tahap alur agent">
-            {AGENT_CHAIN.map((step, index) => (
-              <li
-                key={step}
-                className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium tracking-wide"
-              >
-                <span className="text-white/60" aria-hidden>
-                  {index + 1}
-                </span>
-                {step}
-              </li>
-            ))}
-          </ol>
         </div>
-
-        <p className="max-w-md text-xs text-white/75">
-          Data pada demo ini adalah simulasi (mock SAP), bukan data instansi nyata.
-          Angka keamanan pangan tidak pernah dihitung di sisi tampilan.
-        </p>
       </aside>
 
       {/* Form */}
