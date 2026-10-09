@@ -59,8 +59,26 @@ export const KPI_DEFINITIONS: KpiDefinition[] = [
   },
 ];
 
-/** Format angka KPI sesuai unitnya. */
-export function formatKpiValue(key: keyof KPI, value: number): string {
+/** Label KPI; `avoidableFoodLossRp` tidak punya card sendiri (ditampilkan sebagai nilai rupiah). */
+export function kpiLabel(key: keyof KPI): string {
+  return (
+    KPI_DEFINITIONS.find((definition) => definition.key === key)?.label ??
+    EXTRA_KPI_LABELS[key] ??
+    key
+  );
+}
+
+const EXTRA_KPI_LABELS: Partial<Record<keyof KPI, string>> = {
+  avoidableFoodLossRp: "Avoidable Food Loss (nilai Rp)",
+};
+
+/**
+ * Format angka KPI sesuai unitnya.
+ * KPI yang belum bisa dihitung tampil "—" — bukan 0, yang terbaca seperti "nol kejadian".
+ */
+export function formatKpiValue(key: keyof KPI, value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+
   switch (key) {
     case "avoidableFoodLossKg":
       return formatKg(value);
@@ -86,10 +104,17 @@ export interface KpiTrend {
 
 /**
  * Bandingkan nilai periode berjalan dengan periode sebelumnya.
- * Kalau histori belum ada (atau pembagi 0), hasilnya "flat" — UI tidak boleh
- * mengarang arah trend.
+ * Kalau histori belum ada, nilainya kosong (KPI belum bisa dihitung), atau pembagi 0,
+ * hasilnya "flat" — UI tidak boleh mengarang arah trend.
  */
-export function kpiTrend(current: number, previous?: number | null): KpiTrend {
+export function kpiTrend(
+  current: number | null | undefined,
+  previous?: number | null,
+): KpiTrend {
+  if (current === null || current === undefined || !Number.isFinite(current)) {
+    return { direction: "flat", deltaAbs: 0, deltaPercent: 0 };
+  }
+
   if (previous === undefined || previous === null || previous === 0) {
     return {
       direction: previous === 0 && current !== 0 ? directionOf(current, 0) : "flat",

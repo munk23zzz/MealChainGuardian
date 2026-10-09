@@ -127,27 +127,27 @@ export function getMe(): Promise<User> {
 
 export function getLocations(): Promise<Location[]> {
   if (USE_MOCK) return mockDelay(MOCK_LOCATIONS);
-  return request<Location[]>("/locations");
+  return request<Location[]>("/ui/locations");
 }
 
 export function getCommodities(): Promise<Commodity[]> {
   if (USE_MOCK) return mockDelay(MOCK_COMMODITIES);
-  return request<Commodity[]>("/commodities");
+  return request<Commodity[]>("/ui/commodities");
 }
 
 export function getSupply(): Promise<SupplyRecord[]> {
   if (USE_MOCK) return mockDelay(MOCK_SUPPLY);
-  return request<SupplyRecord[]>("/supply");
+  return request<SupplyRecord[]>("/ui/supply");
 }
 
 export function getDemand(): Promise<DemandRecord[]> {
   if (USE_MOCK) return mockDelay(MOCK_DEMAND);
-  return request<DemandRecord[]>("/demand");
+  return request<DemandRecord[]>("/ui/demand");
 }
 
 export function getDecisions(): Promise<Recommendation[]> {
   if (USE_MOCK) return mockDelay([...mockDecisions]);
-  return request<Recommendation[]>("/decisions");
+  return request<Recommendation[]>("/ui/decisions");
 }
 
 export function getDecision(id: string): Promise<Recommendation> {
@@ -156,7 +156,7 @@ export function getDecision(id: string): Promise<Recommendation> {
     if (found) return mockDelay({ ...found });
     return Promise.reject(new Error("Decision tidak ditemukan"));
   }
-  return request<Recommendation>(`/decisions/${id}`);
+  return request<Recommendation>(`/ui/decisions/${id}`);
 }
 
 /**
@@ -239,7 +239,7 @@ export function getKpi(): Promise<KpiSnapshot> {
   if (USE_MOCK) {
     return mockDelay({ ...MOCK_KPI, previous: MOCK_KPI_PREVIOUS });
   }
-  return request<KpiSnapshot>("/kpi");
+  return request<KpiSnapshot>("/ui/kpi");
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ export function getKpi(): Promise<KpiSnapshot> {
 /** Skor kepercayaan pemasok terkini (Schema.md §1 `suppliers`). */
 export function getSuppliers(): Promise<Supplier[]> {
   if (USE_MOCK) return mockDelay(MOCK_SUPPLIERS.map((s) => ({ ...s })));
-  return request<Supplier[]>("/suppliers");
+  return request<Supplier[]>("/ui/suppliers");
 }
 
 /** Riwayat penerimaan + skor satu pemasok — dasar grafik "sebelum/sesudah insiden". */

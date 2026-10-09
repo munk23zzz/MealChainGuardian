@@ -7,19 +7,23 @@ Dua jangkar:
 * Aturan status lokasi = cermin `frontend/lib/status.ts`: KRITIS hanya kalau ada batch gagal aman
   atau suhu menyimpang; defisit / kesegaran menipis / perlu verifikasi = warning. Jadi Jakarta yang
   hanya kekurangan bahan berwarna KUNING, bukan merah — itu memang aturan yang dipakai UI hari ini.
+
+Semua endpoint UI ada di bawah `/ui/*` supaya kontrak domain (`/supply`, `/decisions`,
+`/actions/*`) tetap utuh untuk agent & AgentCore Gateway.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from api_support import JAKARTA_HEAD, MONITOR, user_headers
+from api_support import JAKARTA_HEAD, MONITOR, approved_decision, propose, user_headers
 
 pytestmark = pytest.mark.usefixtures("client")
 
 # 10 titik: Cianjur + Jakarta (angka §11) + 8 SPPG dari dataset mock UI.
 LOCATION_COUNT = 10
 COMMODITY_NAMES = {"telur", "ayam", "wortel"}
+SUPPLY_COUNT = 17  # satu baris per (lokasi, komoditas) di SUPPLY_ROWS
 
 
 def _by_name(rows: list[dict], name: str) -> dict:
@@ -28,24 +32,38 @@ def _by_name(rows: list[dict], name: str) -> dict:
     return matched[0]
 
 
-def _locations(client, who=JAKARTA_HEAD) -> list[dict]:
-    response = client.get("/locations", headers=user_headers(client, who))
-    assert response.status_code == 200
+def _get(client, path: str, who: str = JAKARTA_HEAD) -> list[dict] | dict:
+    response = client.get(path, headers=user_headers(client, who))
+    assert response.status_code == 200, f"{path} -> {response.status_code}: {response.text[:200]}"
     return response.json()
+
+
+def _locations(client, who: str = JAKARTA_HEAD) -> list[dict]:
+    return _get(client, "/ui/locations", who)  # type: ignore[return-value]
 
 
 def _location_names(client) -> dict[str, str]:
     return {row["id"]: row["name"] for row in _locations(client)}
 
 
-def _demand_by_pair(client) -> dict[tuple[str, str], dict]:
-    locations = _location_names(client)
-    commodities = {
+def _commodity_names(client) -> dict[str, str]:
+    return {
         row["id"]: row["name"]
-        for row in client.get("/commodities", headers=user_headers(client, JAKARTA_HEAD)).json()
+        for row in _get(client, "/ui/commodities")  # type: ignore[union-attr]
     }
-    rows = client.get("/demand", headers=user_headers(client, JAKARTA_HEAD)).json()
-    return {(locations[row["locationId"]], commodities[row["commodityId"]]): row for row in rows}
+
+
+def _supply_by_pair(client) -> dict[tuple[str, str], dict]:
+    locations = _location_names(client)
+    commodities = _commodity_names(client)
+    rows = _get(client, "/ui/supply")
+    return {
+        (locations[row["locationId"]], commodities[row["commodityId"]]): row
+        for row in rows  # type: ignore[union-attr]
+    }
+
+
+# --- Lokasi, komoditas, kebutuhan, pemasok ---------------------------------------------------
 
 
 def test_locations_cover_the_whole_demo_dataset(client):
@@ -81,17 +99,21 @@ def test_location_status_mirrors_the_ui_rule(client):
 
 
 def test_commodities_list_seeded_commodities(client):
-    response = client.get("/commodities", headers=user_headers(client, JAKARTA_HEAD))
+    rows = _get(client, "/ui/commodities")
 
-    assert response.status_code == 200
-    rows = response.json()
-    assert {row["name"] for row in rows} == COMMODITY_NAMES
-    assert {row["unit"] for row in rows} == {"kg"}
-    assert all(row["id"] for row in rows)
+    assert {row["name"] for row in rows} == COMMODITY_NAMES  # type: ignore[union-attr]
+    assert {row["unit"] for row in rows} == {"kg"}  # type: ignore[union-attr]
+    assert all(row["id"] for row in rows)  # type: ignore[union-attr]
 
 
 def test_demand_reports_deficit_and_surplus(client):
-    by_pair = _demand_by_pair(client)
+    locations = _location_names(client)
+    commodities = _commodity_names(client)
+    rows = _get(client, "/ui/demand")
+    by_pair = {
+        (locations[row["locationId"]], commodities[row["commodityId"]]): row
+        for row in rows  # type: ignore[union-attr]
+    }
 
     # §11: Cianjur surplus 900 kg (1.400 stok - 500 kebutuhan), Jakarta defisit 700 kg.
     assert by_pair[("Cianjur", "telur")]["projectedKg"] == 500.0
@@ -99,28 +121,255 @@ def test_demand_reports_deficit_and_surplus(client):
     assert by_pair[("Cianjur", "telur")]["deficitKg"] == 0.0
     assert by_pair[("Jakarta", "telur")]["projectedKg"] == 1000.0
     assert by_pair[("Jakarta", "telur")]["deficitKg"] == 700.0
-    assert by_pair[("Jakarta", "telur")]["surplusKg"] == 0.0
 
     # Titik tambahan ikut terbaca lengkap (240 kg stok vs 400 kg kebutuhan).
     assert by_pair[("SPPG Bekasi", "telur")]["deficitKg"] == 160.0
 
 
 def test_suppliers_use_the_ui_field_names(client):
-    rows = client.get("/suppliers", headers=user_headers(client, JAKARTA_HEAD)).json()
+    rows = _get(client, "/ui/suppliers")
 
-    assert len(rows) == 3
-    assert {row["name"] for row in rows} == {"Supplier A", "Supplier B", "Supplier C"}
-    for row in rows:
+    assert len(rows) == 3  # type: ignore[arg-type]
+    assert {row["name"] for row in rows} == {"Supplier A", "Supplier B", "Supplier C"}  # type: ignore[union-attr]
+    for row in rows:  # type: ignore[union-attr]
         assert set(row) == {"id", "name", "locationId", "reliabilityScore"}
         assert row["reliabilityScore"] == 0.8
 
 
+# --- Pasokan (bentuk SupplyRecord) -----------------------------------------------------------
+
+
+def test_supply_has_one_row_per_pair_with_ui_fields(client):
+    rows = _get(client, "/ui/supply")
+
+    assert len(rows) == SUPPLY_COUNT  # type: ignore[arg-type]
+    for row in rows:  # type: ignore[union-attr]
+        assert set(row) == {
+            "locationId",
+            "commodityId",
+            "physicalStockKg",
+            "usableStockKg",
+            "batchCount",
+            "status",
+            "pricePerKg",
+            "freshnessStatus",
+            "safetyStatus",
+            "temperatureExcursion",
+        }
+        assert row["batchCount"] >= 1
+        assert row["physicalStockKg"] >= row["usableStockKg"]
+
+
+def test_supply_keeps_the_documented_numbers(client):
+    by_pair = _supply_by_pair(client)
+
+    cianjur = by_pair[("Cianjur", "telur")]
+    assert cianjur["physicalStockKg"] == 1400.0
+    assert cianjur["usableStockKg"] == 1400.0
+    assert cianjur["batchCount"] == 1
+    assert cianjur["status"] == "surplus"  # 1.400 stok vs 500 kebutuhan
+    assert cianjur["pricePerKg"] == 26500.0  # harga referensi §11
+    assert cianjur["safetyStatus"] == "PASS"
+    assert cianjur["freshnessStatus"] == "fresh"
+    assert cianjur["temperatureExcursion"] is False
+
+    jakarta = by_pair[("Jakarta", "telur")]
+    assert jakarta["usableStockKg"] == 300.0
+    assert jakarta["status"] == "deficit"  # 300 stok vs 1.000 kebutuhan
+
+
+def test_supply_reports_failed_expired_and_excursing_batches(client):
+    """Tiga kondisi yang membuat lokasi merah/kuning harus terbaca dari pasokan, bukan dari mock."""
+    by_pair = _supply_by_pair(client)
+
+    # Batch ayam gagal aman: stok fisik masih ada di rak, tapi TIDAK boleh dipakai (Schema.md §6).
+    jakarta_selatan = by_pair[("SPPG Jakarta Selatan", "ayam")]
+    assert jakarta_selatan["safetyStatus"] == "FAIL"
+    assert jakarta_selatan["physicalStockKg"] == 50.0
+    assert jakarta_selatan["usableStockKg"] == 0.0
+    assert jakarta_selatan["freshnessStatus"] == "expired"
+    assert jakarta_selatan["status"] == "deficit"
+
+    # Suhu 12,5 °C > ambang rantai dingin 4 °C + kesegaran menipis.
+    jakarta_utara = by_pair[("SPPG Jakarta Utara", "telur")]
+    assert jakarta_utara["safetyStatus"] == "NEEDS_VERIFICATION"
+    assert jakarta_utara["temperatureExcursion"] is True
+    assert jakarta_utara["freshnessStatus"] == "approaching_expiry"
+    assert jakarta_utara["batchCount"] == 2
+
+    # Pasokan sehat tetap hijau.
+    assert by_pair[("SPPG Jakarta Barat", "telur")]["safetyStatus"] == "PASS"
+    assert by_pair[("SPPG Jakarta Barat", "telur")]["freshnessStatus"] == "fresh"
+
+
+# --- Keputusan (bentuk Recommendation) -------------------------------------------------------
+
+
+def _decisions(client) -> list[dict]:
+    return _get(client, "/ui/decisions")  # type: ignore[return-value]
+
+
+def test_decisions_are_not_invented_by_the_seed(client):
+    """Seed tidak mengarang keputusan: tanpa usulan, daftarnya kosong (bukan data palsu)."""
+    assert _decisions(client) == []
+
+
+def test_decision_uses_the_recommendation_shape(client):
+    headers = user_headers(client, JAKARTA_HEAD)
+    propose(client, headers)
+
+    rows = _decisions(client)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert set(row) == {
+        "id",
+        "status",
+        "decisionType",
+        "sourceLocationId",
+        "targetLocationId",
+        "commodityId",
+        "quantityKg",
+        "safeDeliveredCostBreakdown",
+        "evidence",
+        "evidenceItems",
+        "constraints",
+        "verifierNote",
+        "verifiedBy",
+        "safetyCheck",
+        "reason",
+        "createdAt",
+        "approvedAt",
+        "expiresAt",
+        "executedAt",
+        "outcome",
+        "sapPurchaseOrder",
+        "agentTrace",
+    }
+    # Rujukan lokasi/komoditas harus ID (UI mencocokkan lewat id, bukan nama).
+    locations = _location_names(client)
+    commodities = _commodity_names(client)
+    assert locations[row["sourceLocationId"]] == "Cianjur"
+    assert locations[row["targetLocationId"]] == "Jakarta"
+    assert commodities[row["commodityId"]] == "telur"
+    assert row["quantityKg"] == 700.0
+    assert row["status"] == "pending_approval"
+    # Belum ada bukti apa pun -> 0%, bukan angka yang dilebihkan.
+    assert row["evidence"]["completenessPercent"] == 0.0
+    # `cost_breakdown` belum diisi penulisnya (`/cost/safe-delivered` belum ada).
+    assert row["safeDeliveredCostBreakdown"] == []
+
+
+def test_decision_reason_is_derived_from_the_real_deficit(client):
+    """Alasan diturunkan dari angka nyata: defisit telur Jakarta = 1.000 - 300 = 700 kg."""
+    propose(client, user_headers(client, JAKARTA_HEAD))
+
+    reason = _decisions(client)[0]["reason"]
+
+    assert "Defisit" in reason and "700" in reason and "Jakarta" in reason
+
+
+def test_executed_decision_carries_purchase_order_evidence_and_trace(client, supplier_id):
+    headers = user_headers(client, JAKARTA_HEAD)
+    decision_id = approved_decision(client, headers, supplier_id)
+
+    row = client.get(f"/ui/decisions/{decision_id}", headers=headers).json()
+
+    order = row["sapPurchaseOrder"]
+    assert order is not None
+    assert order["poNumber"].startswith("4500")
+    assert order["orderedQuantityKg"] == 700.0
+    # Plant mengikuti lokasi TUJUAN (Jakarta -> JK01), bukan lokasi asal (Cianjur -> CJ01).
+    assert order["plant"] == "JK01"
+
+    steps = [step["step"] for step in row["agentTrace"]]
+    assert "DECIDE" in steps and "ACT" in steps
+    assert all(step["timestamp"] for step in row["agentTrace"])
+
+    assert row["evidence"]["sap"] is True
+    assert row["evidence"]["completenessPercent"] == pytest.approx(33.3, abs=0.1)
+    assert row["evidenceItems"][0]["source"].startswith("SAP PO ")
+    assert row["status"] == "executed"
+    assert row["executedAt"] is not None
+
+
+def test_decision_expiry_is_reported_as_missing_not_invented(client):
+    """`expires_at` belum diisi `/actions/propose` — UI harus menerima null, bukan tanggal karangan."""
+    propose(client, user_headers(client, JAKARTA_HEAD))
+
+    assert _decisions(client)[0]["expiresAt"] is None
+
+
+def test_decision_detail_and_not_found(client):
+    headers = user_headers(client, JAKARTA_HEAD)
+    propose(client, headers)
+    decision_id = _decisions(client)[0]["id"]
+
+    detail = client.get(f"/ui/decisions/{decision_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["id"] == decision_id
+
+    assert client.get("/ui/decisions/bukan-uuid", headers=headers).status_code == 404
+    unknown = "00000000-0000-4000-8000-000000000000"
+    assert client.get(f"/ui/decisions/{unknown}", headers=headers).status_code == 404
+
+
+# --- Batas akses -----------------------------------------------------------------------------
+
+
 def test_read_endpoints_require_a_valid_token(client):
     """Endpoint UI memerlukan identitas: tanpa token jangan menyajikan data (bukan 200 kosong)."""
-    for path in ("/locations", "/commodities", "/demand", "/suppliers"):
+    for path in (
+        "/ui/locations",
+        "/ui/commodities",
+        "/ui/supply",
+        "/ui/demand",
+        "/ui/suppliers",
+        "/ui/decisions",
+        "/ui/kpi",
+    ):
         assert client.get(path).status_code == 401, path
 
 
 def test_monitor_can_read_locations(client):
     """bgn_monitor read-only — boleh membaca, tidak boleh approve (batas itu di actions)."""
     assert len(_locations(client, MONITOR)) == LOCATION_COUNT
+
+
+# --- KPI ---------------------------------------------------------------------------------------
+
+
+def test_kpi_is_computed_from_seeded_data_and_never_pads_missing_metrics(client, supplier_id):
+    headers = user_headers(client, JAKARTA_HEAD)
+    approved_decision(client, headers, supplier_id)
+
+    kpi = client.get("/ui/kpi", headers=headers).json()
+
+    # Sudah dieksekusi -> 1/1 keputusan regional tuntas; bukti SAP saja = 1 dari 3 kanal.
+    assert kpi["regionalImbalanceResolutionRate"] == 100.0
+    assert kpi["evidenceCompletenessPercent"] == pytest.approx(33.3, abs=0.1)
+    assert kpi["averageSafeDeliveredCostPerKg"] == 26200.0
+    # Kuotasi telur diuji terhadap harga acuan PIHPS -> angkanya ada dan masuk akal (0-100%).
+    assert 0 < kpi["averageProcurementPriceDeviationPercent"] < 100
+
+    # KPI yang bahannya tidak ada di skema TIDAK dikirim sebagai 0 — UI menampilkan "—".
+    for key in ("mealContinuityRate", "avoidableFoodLossKg", "avoidableFoodLossRp"):
+        assert key not in kpi, f"{key} tidak punya sumber data, jangan diisi 0"
+        assert "skema" in kpi["unavailable"][key]
+
+    # Histori periode sebelumnya memang belum ada (job KPI belum menulis `kpi_snapshots`).
+    assert "previous" not in kpi
+
+
+def test_kpi_explains_what_it_cannot_compute_yet(client):
+    """Tanpa keputusan sama sekali, semua KPI berbasis keputusan absen + ada alasannya."""
+    kpi = client.get("/ui/kpi", headers=user_headers(client, JAKARTA_HEAD)).json()
+
+    for key in (
+        "evidenceCompletenessPercent",
+        "averageSafeDeliveredCostPerKg",
+        "regionalImbalanceResolutionRate",
+        "averageDecisionTimeMinutes",
+    ):
+        assert key not in kpi
+        assert kpi["unavailable"][key]

@@ -9,8 +9,10 @@ import { SkeletonCard } from "@/components/ui/skeleton";
 import { useKpi } from "@/hooks/use-data";
 import { useAuth } from "@/contexts/auth";
 import { scopeForRole } from "@/lib/role";
+import type { KPI } from "@/lib/api/schema";
 import {
   KPI_DEFINITIONS,
+  kpiLabel,
   kpiTrend,
   trendIsImprovement,
 } from "@/lib/kpi";
@@ -48,6 +50,10 @@ export default function KpiPage() {
   }, [kpi]);
 
   const { improved, worsened, flat } = trends;
+  /** Nilai rupiah food loss yang dihindari; kosong = belum ada sumbernya di skema (bukan 0). */
+  const foodLossRp = kpi?.avoidableFoodLossRp ?? 0;
+  /** KPI yang belum bisa dihitung backend — ditampilkan sebagai "—" beserta alasannya. */
+  const unavailable = Object.entries(kpi?.unavailable ?? {}) as [keyof KPI, string][];
 
   return (
     <div className="flex flex-col gap-6">
@@ -121,23 +127,41 @@ export default function KpiPage() {
                   definition={definition}
                   value={kpi[definition.key]}
                   trend={kpiTrend(kpi[definition.key], previous ?? null)}
+                  unavailableReason={kpi.unavailable?.[definition.key]}
                 />
               );
             })}
           </div>
 
-          {kpi.avoidableFoodLossRp > 0 && (
+          {foodLossRp > 0 && (
             <Card className="animate-fade-up border-l-4 border-l-status-safe">
               <CardContent className="flex flex-wrap items-baseline gap-x-2 py-3">
                 <span className="font-medium text-navy-900">
                   Nilai ekonomi food loss yang dihindari:
                 </span>
                 <span className="text-lg font-semibold tabular-nums text-navy-900">
-                  {formatRupiah(kpi.avoidableFoodLossRp)}
+                  {formatRupiah(foodLossRp)}
                 </span>
                 <span className="text-muted-foreground">
-                  ({formatKg(kpi.avoidableFoodLossKg)} setara)
+                  ({formatKg(kpi.avoidableFoodLossKg ?? 0)} setara)
                 </span>
+              </CardContent>
+            </Card>
+          )}
+
+          {unavailable.length > 0 && (
+            <Card className="animate-fade-up">
+              <CardContent className="flex flex-col gap-2 py-4">
+                <p className="text-sm font-medium text-navy-900">
+                  KPI yang belum bisa dihitung (ditampilkan &quot;—&quot;, bukan 0):
+                </p>
+                <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                  {unavailable.map(([key, reason]) => (
+                    <li key={key}>
+                      <span className="font-medium text-navy-900">{kpiLabel(key)}</span>: {reason}
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
           )}

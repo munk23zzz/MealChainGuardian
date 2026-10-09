@@ -1,24 +1,31 @@
-"""Endpoint baca untuk UI — bentuknya sengaja mengikuti `frontend/lib/api/schema.d.ts`.
+"""Endpoint baca untuk UI — SEMUA di bawah `/ui/*`, bentuknya mengikuti `frontend/lib/api/schema.d.ts`.
 
-Kenapa berkas terpisah dari `supply.py`/`decisions.py`: dua endpoint itu memakai istilah domain +
-snake_case, kontrak yang dipakai test integrasi SAP dan (S3-01) akan didaftarkan ke AgentCore
-Gateway. UI butuh bentuk lain — camelCase + nilai TURUNAN seperti `status` lokasi. Menambah endpoint
-di sini tidak mengubah kontrak yang sudah ada, jadi integrasi agent tidak ikut berisiko.
+Kenapa dipisah dari kontrak domain (`/supply`, `/decisions`, `/actions/*`): kontrak domain memakai
+istilah + bentuk SAP/agent (snake_case, nama lokasi, batch) dan itulah yang nanti didaftarkan ke
+AgentCore Gateway. UI butuh bentuk lain — camelCase, dirujuk lewat **id**, plus angka TURUNAN
+(status lokasi, stok terpakai, status pasokan). Menambah endpoint di sini tidak mengubah satu pun
+respons lama, jadi integrasi agent tidak ikut berisiko.
 
 Yang dihitung di sini karena hanya backend yang punya datanya (Rules.md: angka tidak dikarang di
-frontend): stok terpakai dari `batches`, kebutuhan terbaru per lokasi, dan status lokasi (aturannya
-di `app/core/location_status.py`, cermin `frontend/lib/status.ts`).
+frontend):
+- stok fisik/terpakai per (lokasi, komoditas) dari `batches` — batch gagal aman dan batch lewat masa
+  pakai TIDAK dihitung sebagai stok terpakai (Schema.md §6);
+- status lokasi (aturannya di `app/core/location_status.py`, cermin `frontend/lib/status.ts`);
+- kebutuhan terbaru per pasangan (bukan jumlah seluruh riwayat);
+- bentuk `Recommendation` dari `decisions` + approval + jejak agen + bukti + PO.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Literal, cast
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,9 +37,52 @@ from app.core.location_status import (
     has_temperature_excursion,
     location_status,
 )
-from app.models import Batch, Commodity, DemandRecord, Location, Supplier
+from app.models import (
+    AgentTrace,
+    Approval,
+    Batch,
+    Commodity,
+    Decision,
+    DecisionEvidence,
+    DemandRecord,
+    Location,
+    PriceSignal,
+    SapMockPurchaseOrder,
+    Supplier,
+)
+from app.core.kpi import DecisionFact, PriceFact, compute_kpi
+from app.sap_integration.field_mapping import PLANT_CODE_BY_LOCATION
 
-router = APIRouter(tags=["ui"])
+router = APIRouter(prefix="/ui", tags=["ui"])
+
+# Nilai yang dipakai UI (lihat `frontend/lib/api/schema.d.ts`). Ditulis sebagai literal supaya
+# salah ketik tertangkap type checker, bukan jadi string bebas yang lolos ke frontend.
+SafetyStatus = Literal["PASS", "FAIL", "NEEDS_VERIFICATION"]
+SupplyStatus = Literal["surplus", "balanced", "deficit"]
+FreshnessStatus = Literal["fresh", "approaching_expiry", "expired"]
+EvidenceType = Literal[
+    "sap_purchase_order",
+    "sap_goods_receipt",
+    "gps",
+    "temperature",
+    "human_inspection",
+    "market_price",
+]
+DecisionType = Literal["regional_balance", "price_anomaly", "safety_disruption"]
+Outcome = Literal["pending", "success", "failure"]
+
+EVIDENCE_LABELS: dict[str, str] = {
+    "sap_purchase_order": "SAP — purchase order",
+    "sap_goods_receipt": "SAP — goods receipt",
+    "gps": "GPS kendaraan",
+    "temperature": "Suhu (sensor IoT)",
+    "human_inspection": "Inspeksi fisik petugas",
+    "market_price": "Harga pasar (referensi)",
+}
+
+# Tiga kanal bukti yang diminta Skill.md §4 untuk KPI kelengkapan bukti (SAP + IoT + fisik).
+_SAP_EVIDENCE = {"sap_purchase_order", "sap_goods_receipt"}
+_IOT_EVIDENCE = {"temperature", "gps"}
 
 
 def _now() -> datetime:
@@ -64,6 +114,23 @@ class CommodityOut(BaseModel):
     unit: str
 
 
+class SupplyOut(BaseModel):
+    """`SupplyRecord` — satu baris per (lokasi, komoditas)."""
+
+    location_id: str = Field(serialization_alias="locationId")
+    commodity_id: str = Field(serialization_alias="commodityId")
+    physical_stock_kg: float = Field(serialization_alias="physicalStockKg")
+    usable_stock_kg: float = Field(serialization_alias="usableStockKg")
+    batch_count: int = Field(serialization_alias="batchCount")
+    status: SupplyStatus
+    price_per_kg: float = Field(serialization_alias="pricePerKg")
+    freshness_status: FreshnessStatus = Field(serialization_alias="freshnessStatus")
+    safety_status: SafetyStatus = Field(serialization_alias="safetyStatus")
+    temperature_excursion: bool = Field(
+        default=False, serialization_alias="temperatureExcursion"
+    )
+
+
 class DemandOut(BaseModel):
     """`DemandRecord` di `frontend/lib/api/schema.d.ts`."""
 
@@ -81,6 +148,139 @@ class SupplierOut(BaseModel):
     reliability_score: float = Field(serialization_alias="reliabilityScore")
 
 
+class CostCandidateOut(BaseModel):
+    """`CandidateCostBreakdown` — diteruskan apa adanya dari `decisions.cost_breakdown`."""
+
+    candidate_id: str = Field(serialization_alias="candidateId")
+    supplier_id: str = Field(serialization_alias="supplierId")
+    price_per_kg: float = Field(serialization_alias="pricePerKg")
+    transport_cost_per_kg: float = Field(serialization_alias="transportCostPerKg")
+    handling_cost_per_kg: float = Field(serialization_alias="handlingCostPerKg")
+    spoilage_risk_cost_per_kg: float = Field(serialization_alias="spoilageRiskCostPerKg")
+    freshness_risk_cost_per_kg: float | None = Field(
+        default=None, serialization_alias="freshnessRiskCostPerKg"
+    )
+    safety_penalty_per_kg: float = Field(serialization_alias="safetyPenaltyPerKg")
+    total_safe_delivered_cost_per_kg: float = Field(
+        serialization_alias="totalSafeDeliveredCostPerKg"
+    )
+    distance_km: float = Field(serialization_alias="distanceKm")
+    eta_minutes: float = Field(serialization_alias="etaMinutes")
+    evidence_completeness: float = Field(serialization_alias="evidenceCompleteness")
+
+
+class InconsistencyOut(BaseModel):
+    description: str
+
+
+class EvidenceSummaryOut(BaseModel):
+    """`EvidenceSummary` — ringkasan tiga kanal bukti yang diminta Skill.md §4."""
+
+    sap: bool
+    iot: bool
+    physical: bool
+    completeness_percent: float = Field(serialization_alias="completenessPercent")
+    inconsistencies: list[InconsistencyOut] = []
+
+
+class EvidenceItemOut(BaseModel):
+    id: str | None = None
+    type: EvidenceType
+    source: str
+    summary: str | None = None
+    recorded_at: datetime = Field(serialization_alias="recordedAt")
+    is_consistent: bool | None = Field(serialization_alias="isConsistent")
+
+
+class ConstraintCheckOut(BaseModel):
+    name: str
+    passed: bool
+    detail: str | None = None
+
+
+class AgentStepOut(BaseModel):
+    step: str
+    tool: str | None = None
+    timestamp: datetime
+    input_summary: str | None = Field(default=None, serialization_alias="inputSummary")
+    output_summary: str | None = Field(default=None, serialization_alias="outputSummary")
+    duration_ms: int | None = Field(default=None, serialization_alias="durationMs")
+    step_at: datetime | None = Field(default=None, serialization_alias="stepAt")
+
+
+class SapPurchaseOrderOut(BaseModel):
+    po_number: str = Field(serialization_alias="poNumber")
+    plant: str
+    ordered_quantity_kg: float = Field(serialization_alias="orderedQuantityKg")
+    status: str
+
+
+class KpiSnapshotOut(BaseModel):
+    """`KpiSnapshot` di `frontend/lib/api/schema.d.ts` — HANYA KPI yang sumber datanya ada.
+
+    Field yang tidak bisa dihitung sengaja tidak dikirim (bukan 0, yang terbaca seperti "nol
+    kejadian") dan alasannya ikut di `unavailable`, supaya UI menampilkan "—" dan juri bisa melihat
+    apa yang memang belum tersimpan di skema.
+
+    `alias` (bukan cuma serialization_alias) dipakai karena `compute_kpi` mengembalikan kunci
+    camelCase persis seperti kontrak UI; tanpa itu Pydantic membuang kuncinya tanpa suara dan semua
+    KPI hilang dari respons.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    meal_continuity_rate: float | None = Field(default=None, alias="mealContinuityRate")
+    avoidable_food_loss_kg: float | None = Field(default=None, alias="avoidableFoodLossKg")
+    avoidable_food_loss_rp: float | None = Field(default=None, alias="avoidableFoodLossRp")
+    regional_imbalance_resolution_rate: float | None = Field(
+        default=None, alias="regionalImbalanceResolutionRate"
+    )
+    average_safe_delivered_cost_per_kg: float | None = Field(
+        default=None, alias="averageSafeDeliveredCostPerKg"
+    )
+    average_procurement_price_deviation_percent: float | None = Field(
+        default=None, alias="averageProcurementPriceDeviationPercent"
+    )
+    average_decision_time_minutes: float | None = Field(
+        default=None, alias="averageDecisionTimeMinutes"
+    )
+    evidence_completeness_percent: float | None = Field(
+        default=None, alias="evidenceCompletenessPercent"
+    )
+    unavailable: dict[str, str] = Field(default_factory=dict)
+
+
+class RecommendationOut(BaseModel):
+    """`Recommendation` di `frontend/lib/api/schema.d.ts`."""
+
+    id: str
+    status: str
+    decision_type: DecisionType = Field(serialization_alias="decisionType")
+    source_location_id: str = Field(serialization_alias="sourceLocationId")
+    target_location_id: str = Field(serialization_alias="targetLocationId")
+    commodity_id: str = Field(serialization_alias="commodityId")
+    quantity_kg: float = Field(serialization_alias="quantityKg")
+    safe_delivered_cost_breakdown: list[CostCandidateOut] = Field(
+        default=[], serialization_alias="safeDeliveredCostBreakdown"
+    )
+    evidence: EvidenceSummaryOut
+    evidence_items: list[EvidenceItemOut] = Field(default=[], serialization_alias="evidenceItems")
+    constraints: list[ConstraintCheckOut] | None = None
+    verifier_note: str | None = Field(default=None, serialization_alias="verifierNote")
+    verified_by: str | None = Field(default=None, serialization_alias="verifiedBy")
+    safety_check: SafetyStatus = Field(serialization_alias="safetyCheck")
+    reason: str
+    created_at: datetime = Field(serialization_alias="createdAt")
+    approved_at: datetime | None = Field(default=None, serialization_alias="approvedAt")
+    expires_at: datetime | None = Field(default=None, serialization_alias="expiresAt")
+    executed_at: datetime | None = Field(default=None, serialization_alias="executedAt")
+    outcome: Outcome | None = None
+    sap_purchase_order: SapPurchaseOrderOut | None = Field(
+        default=None, serialization_alias="sapPurchaseOrder"
+    )
+    agent_trace: list[AgentStepOut] = Field(default=[], serialization_alias="agentTrace")
+
+
 # --- Turunan dari tabel domain --------------------------------------------------------------
 
 
@@ -88,26 +288,73 @@ class SupplierOut(BaseModel):
 class PairSupply:
     """Kondisi satu pasangan (lokasi, komoditas) dari batch-nya."""
 
+    physical_kg: Decimal
     usable_kg: Decimal
-    has_safety_fail: bool
-    has_needs_verification: bool
+    batch_count: int
+    safety_status: SafetyStatus
+    freshness_status: FreshnessStatus
     has_temperature_excursion: bool
-    has_freshness_risk: bool
+
+    @property
+    def has_safety_fail(self) -> bool:
+        return self.safety_status == "FAIL"
+
+    @property
+    def has_needs_verification(self) -> bool:
+        return self.safety_status == "NEEDS_VERIFICATION"
+
+    @property
+    def has_freshness_risk(self) -> bool:
+        return self.freshness_status != "fresh"
 
 
-def _supply_by_pair(
-    session: Session, now: datetime
-) -> dict[tuple[uuid.UUID, uuid.UUID], PairSupply]:
-    """Stok terpakai + tanda bahaya per (lokasi, komoditas), dari `batches` (Schema.md §2).
+@dataclass(frozen=True)
+class PriceLookup:
+    """Harga per pasangan + acuan per komoditas (cadangan), lihat `_price_lookup`."""
+
+    by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal]
+    by_commodity: dict[uuid.UUID, Decimal]
+
+    def price_for(self, location_id: uuid.UUID, commodity_id: uuid.UUID) -> Decimal:
+        return self.by_pair.get(
+            (location_id, commodity_id), self.by_commodity.get(commodity_id, Decimal(0))
+        )
+
+
+def _worst_safety(statuses: list[str]) -> SafetyStatus:
+    """Keparahan tertinggi: FAIL > NEEDS_VERIFICATION > PASS (mock UI memakai urutan ini)."""
+    if "fail" in statuses:
+        return "FAIL"
+    if "needs_verification" in statuses:
+        return "NEEDS_VERIFICATION"
+    return "PASS"
+
+
+def _freshness(earliest_usable_until: datetime | None, now: datetime) -> FreshnessStatus:
+    """Kesegaraan satu pasokan dari masa pakai TERPENDEK.
+
+    `usable_until` kosong = freshness belum dievaluasi (`/freshness/evaluate` belum jalan), jadi
+    dilaporkan `fresh` — bukan `expired` yang akan menuduh data yang memang belum ada.
+    """
+    if earliest_usable_until is None:
+        return "fresh"
+    if earliest_usable_until <= now:
+        return "expired"
+    if earliest_usable_until <= now + FRESHNESS_WARNING_WINDOW:
+        return "approaching_expiry"
+    return "fresh"
+
+
+def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uuid.UUID], PairSupply]:
+    """Stok fisik/terpakai + status kesegaran/keamanan per (lokasi, komoditas), dari `batches`.
 
     Aturan yang dipegang di sini:
     - batch `safety_status='fail'` TIDAK menambah stok terpakai (Schema.md §6: batch gagal aman
       tidak boleh jadi kandidat alokasi), dan batch yang `usable_until`-nya sudah lewat juga tidak;
       menganggap keduanya tersedia akan membuat lokasi kekurangan tampak hijau;
+    - stok FISIK tetap dihitung apa adanya (termasuk batch gagal) — itu yang dilihat petugas di rak;
     - tanda bahayanya tetap dihitung walau stoknya dibuang — justru itu yang membuat lokasi
-      bermasalah terlihat di peta;
-    - `usable_until` kosong = freshness belum dievaluasi (`/freshness/evaluate` belum jalan), jadi
-      bukan tanda bahaya.
+      bermasalah terlihat di peta.
     """
     rows = session.execute(
         select(
@@ -120,45 +367,57 @@ def _supply_by_pair(
         )
     ).all()
 
-    freshness_deadline = now + FRESHNESS_WARNING_WINDOW
+    physical: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
     usable: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
-    state: dict[tuple[uuid.UUID, uuid.UUID], dict[str, bool]] = {}
+    counts: dict[tuple[uuid.UUID, uuid.UUID], int] = {}
+    statuses: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = {}
+    earliest: dict[tuple[uuid.UUID, uuid.UUID], datetime | None] = {}
+    excursion: dict[tuple[uuid.UUID, uuid.UUID], bool] = {}
 
     for location_id, commodity_id, quantity_kg, safety_status, temperature_log, usable_until in rows:
         key = (location_id, commodity_id)
-        usable.setdefault(key, Decimal(0))
-        flags = state.setdefault(
-            key,
-            {
-                "fail": False,
-                "needs_verification": False,
-                "temperature": False,
-                "freshness": False,
-            },
-        )
+        quantity = _decimal(quantity_kg)
         expired = usable_until is not None and usable_until <= now
 
-        if safety_status == "fail":
-            flags["fail"] = True
-        if safety_status == "needs_verification":
-            flags["needs_verification"] = True
+        physical[key] = physical.get(key, Decimal(0)) + quantity
+        usable.setdefault(key, Decimal(0))
+        counts[key] = counts.get(key, 0) + 1
+        statuses.setdefault(key, []).append(safety_status)
+
+        current_earliest = earliest.get(key)
+        if usable_until is not None and (current_earliest is None or usable_until < current_earliest):
+            earliest[key] = usable_until
         if has_temperature_excursion(temperature_log):
-            flags["temperature"] = True
-        if expired or (usable_until is not None and usable_until <= freshness_deadline):
-            flags["freshness"] = True
+            excursion[key] = True
+
         if safety_status != "fail" and not expired:
-            usable[key] += _decimal(quantity_kg)
+            usable[key] += quantity
 
     return {
         key: PairSupply(
+            physical_kg=physical[key],
             usable_kg=usable[key],
-            has_safety_fail=flags["fail"],
-            has_needs_verification=flags["needs_verification"],
-            has_temperature_excursion=flags["temperature"],
-            has_freshness_risk=flags["freshness"],
+            batch_count=counts[key],
+            safety_status=_worst_safety(statuses[key]),
+            freshness_status=_freshness(earliest.get(key), now),
+            has_temperature_excursion=excursion.get(key, False),
         )
-        for key, flags in state.items()
+        for key in physical
     }
+
+
+def _supply_status(usable_kg: Decimal, demand_kg: Decimal) -> SupplyStatus:
+    """Status pasokan satu baris: bandingkan stok terpakai dengan kebutuhan.
+
+    Tidak ada baris kebutuhan untuk pasangan itu = tidak ada kekurangan, jadi `surplus` (bukan
+    `deficit` yang akan menuduh tanpa dasar). Bandingannya memakai angka yang SAMA dengan
+    `/ui/demand`, supaya stok dan kebutuhan tidak pernah bertentangan di layar.
+    """
+    if demand_kg > usable_kg:
+        return "deficit"
+    if usable_kg > demand_kg:
+        return "surplus"
+    return "balanced"
 
 
 def _latest_demand(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], Decimal]:
@@ -181,6 +440,30 @@ def _latest_demand(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], Decima
     for row in rows:
         latest.setdefault((row.location_id, row.commodity_id), _decimal(row.quantity_kg))
     return latest
+
+
+def _price_lookup(session: Session) -> PriceLookup:
+    """Harga terbaru per (lokasi, komoditas) + acuan per komoditas sebagai cadangan.
+
+    `price_signals` bersifat time-series (Schema.md §2), jadi yang dipakai sinyal TERBARU. Kalau satu
+    pasangan belum punya sinyal harga sendiri, harga referensi komoditas yang sama dipakai supaya UI
+    menampilkan acuan pasar — bukan 0 yang terbaca seperti "gratis".
+    """
+    rows = (
+        session.execute(
+            select(PriceSignal).order_by(
+                PriceSignal.recorded_at.desc(), PriceSignal.created_at.desc()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+    by_commodity: dict[uuid.UUID, Decimal] = {}
+    for row in rows:
+        by_pair.setdefault((row.location_id, row.commodity_id), _decimal(row.price_per_kg))
+        by_commodity.setdefault(row.commodity_id, _decimal(row.price_per_kg))
+    return PriceLookup(by_pair=by_pair, by_commodity=by_commodity)
 
 
 # --- Endpoint -------------------------------------------------------------------------------
@@ -228,6 +511,40 @@ def list_commodities(session: SessionDep, _user: CurrentUser) -> list[CommodityO
     return [CommodityOut(id=str(row.id), name=row.name, unit=row.unit) for row in rows]
 
 
+@router.get("/supply", response_model=list[SupplyOut])
+def list_supply(session: SessionDep, _user: CurrentUser) -> list[SupplyOut]:
+    """Stok per (lokasi, komoditas) dalam bentuk UI: fisik, terpakai, batch, kesegaran, keamanan.
+
+    Ini pengganti `/supply` domain untuk UI: `/supply` tetap menyajikan per-batch dalam istilah SAP
+    (nama lokasi, kode batch) karena itu yang dipakai agent & test integrasi SAP.
+    """
+    now = _now()
+    supplies = _supply_by_pair(session, now)
+    demand = _latest_demand(session)
+    prices = _price_lookup(session)
+
+    out: list[SupplyOut] = []
+    for (location_id, commodity_id), pair in sorted(
+        supplies.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
+    ):
+        demand_kg = demand.get((location_id, commodity_id), Decimal(0))
+        out.append(
+            SupplyOut(
+                location_id=str(location_id),
+                commodity_id=str(commodity_id),
+                physical_stock_kg=float(pair.physical_kg),
+                usable_stock_kg=float(pair.usable_kg),
+                batch_count=pair.batch_count,
+                status=_supply_status(pair.usable_kg, demand_kg),
+                price_per_kg=float(prices.price_for(location_id, commodity_id)),
+                freshness_status=pair.freshness_status,
+                safety_status=pair.safety_status,
+                temperature_excursion=pair.has_temperature_excursion,
+            )
+        )
+    return out
+
+
 @router.get("/demand", response_model=list[DemandOut])
 def list_demand(session: SessionDep, _user: CurrentUser) -> list[DemandOut]:
     """Kebutuhan per lokasi+komoditas, dengan selisih terhadap stok yang masih boleh dipakai."""
@@ -264,3 +581,365 @@ def list_suppliers(session: SessionDep, _user: CurrentUser) -> list[SupplierOut]
         )
         for row in rows
     ]
+
+
+# --- Keputusan: bentuk `Recommendation` yang dibaca UI -----------------------------------------
+
+
+def _json_summary(payload: object) -> str | None:
+    """Ringkasan JSON singkat untuk langkah agen (kolomnya JSONB, UI menampilkan teks)."""
+    if not isinstance(payload, dict) or not payload:
+        return None
+    text = json.dumps(payload, ensure_ascii=False, default=str)
+    return text if len(text) <= 200 else f"{text[:197]}..."
+
+
+def _number(item: dict, *keys: str) -> float:
+    """Ambil angka pertama yang ada dari beberapa kemungkinan nama kunci (snake/camel)."""
+    for key in keys:
+        if item.get(key) is not None:
+            return float(item[key])
+    return 0.0
+
+
+def _optional_number(item: dict, *keys: str) -> float | None:
+    for key in keys:
+        if item.get(key) is not None:
+            return float(item[key])
+    return None
+
+
+def _cost_candidates(decision: Decision) -> list[CostCandidateOut]:
+    """Kandidat Safe Delivered Cost dari `decisions.cost_breakdown` (JSONB, Schema.md §3).
+
+    Kolom itu belum diisi penulisnya (agent `/cost/safe-delivered` belum ada), jadi hasilnya memang
+    daftar kosong — bukan angka 0 yang dikarang supaya grafik terlihat hidup. Bentuk yang diterima:
+    daftar dict, atau dict dengan kunci `candidates`/`breakdown`.
+    """
+    raw = decision.cost_breakdown
+    if isinstance(raw, dict):
+        raw = raw.get("candidates") or raw.get("breakdown") or []
+    if not isinstance(raw, list):
+        return []
+
+    out: list[CostCandidateOut] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            CostCandidateOut(
+                candidate_id=str(item.get("candidate_id") or item.get("candidateId") or ""),
+                supplier_id=str(item.get("supplier_id") or item.get("supplierId") or ""),
+                price_per_kg=_number(item, "price_per_kg", "pricePerKg"),
+                transport_cost_per_kg=_number(
+                    item, "transport_cost_per_kg", "transportCostPerKg"
+                ),
+                handling_cost_per_kg=_number(item, "handling_cost_per_kg", "handlingCostPerKg"),
+                spoilage_risk_cost_per_kg=_number(
+                    item, "spoilage_risk_cost_per_kg", "spoilageRiskCostPerKg"
+                ),
+                freshness_risk_cost_per_kg=_optional_number(
+                    item, "freshness_risk_cost_per_kg", "freshnessRiskCostPerKg"
+                ),
+                safety_penalty_per_kg=_number(item, "safety_penalty_per_kg", "safetyPenaltyPerKg"),
+                total_safe_delivered_cost_per_kg=_number(
+                    item, "total_safe_delivered_cost_per_kg", "totalSafeDeliveredCostPerKg"
+                ),
+                distance_km=_number(item, "distance_km", "distanceKm"),
+                eta_minutes=_number(item, "eta_minutes", "etaMinutes"),
+                evidence_completeness=_number(
+                    item, "evidence_completeness", "evidenceCompleteness"
+                ),
+            )
+        )
+    return out
+
+
+def _evidence_source(kind: str, payload: dict) -> str:
+    """Sumber bukti yang bisa ditelusuri (design.md §3.3), dibaca dari payload yang tersimpan."""
+    if kind.startswith("sap_") and payload.get("purchase_order"):
+        return f"SAP PO {payload['purchase_order']}"
+    if kind == "temperature" and payload.get("celsius") is not None:
+        return f"Sensor suhu {payload['celsius']} °C"
+    if kind == "market_price":
+        return "Referensi harga pasar"
+    return EVIDENCE_LABELS.get(kind, kind)
+
+
+def _inconsistency_description(item: DecisionEvidence) -> str:
+    payload = item.payload if isinstance(item.payload, dict) else {}
+    note = payload.get("note") or payload.get("detail")
+    if note:
+        return str(note)
+    label = EVIDENCE_LABELS.get(item.evidence_type, item.evidence_type)
+    return f"Bukti {label} ditandai tidak konsisten"
+
+
+def _evidence_summary(items: list[DecisionEvidence]) -> EvidenceSummaryOut:
+    """Ringkasan tiga kanal bukti yang diminta Skill.md §4 (SAP + IoT + fisik)."""
+    kinds = {item.evidence_type for item in items}
+    sap = bool(kinds & _SAP_EVIDENCE)
+    iot = bool(kinds & _IOT_EVIDENCE)
+    physical = "human_inspection" in kinds
+    return EvidenceSummaryOut(
+        sap=sap,
+        iot=iot,
+        physical=physical,
+        completeness_percent=round(sum((sap, iot, physical)) / 3 * 100, 1),
+        inconsistencies=[
+            InconsistencyOut(description=_inconsistency_description(item))
+            for item in items
+            if item.is_consistent is False
+        ],
+    )
+
+
+def _safety_check(session: Session, decision: Decision) -> SafetyStatus:
+    """Keamanan pangan keputusan = batch komoditas itu di lokasi TUJUAN (kalau ada), lalu asal.
+
+    `decisions` tidak punya kolom safety (Schema.md §3); hasil evaluasi tersimpan di
+    `batches.safety_status`. Yang dilaporkan kondisi terburuk, karena satu batch gagal aman sudah
+    cukup untuk menahan keputusan.
+    """
+    if decision.commodity_id is None:
+        return "PASS"
+
+    for location_id in (decision.target_location_id, decision.source_location_id):
+        if location_id is None:
+            continue
+        statuses = list(
+            session.scalars(
+                select(Batch.safety_status).where(
+                    Batch.location_id == location_id,
+                    Batch.commodity_id == decision.commodity_id,
+                )
+            ).all()
+        )
+        if statuses:
+            return _worst_safety(statuses)
+    return "PASS"
+
+
+def _purchase_order(session: Session, decision: Decision) -> SapPurchaseOrderOut | None:
+    """PO SAP (mock) yang lahir dari keputusan ini (`sap_mock_purchase_orders.decision_id`)."""
+    order = session.scalar(
+        select(SapMockPurchaseOrder).where(SapMockPurchaseOrder.decision_id == decision.id)
+    )
+    if order is None:
+        return None
+
+    target = session.get(Location, decision.target_location_id) if decision.target_location_id else None
+    plant = PLANT_CODE_BY_LOCATION.get(target.name if target else "", "")
+    return SapPurchaseOrderOut(
+        po_number=order.po_number,
+        plant=plant,
+        ordered_quantity_kg=float(order.ordered_quantity),
+        status=order.status,
+    )
+
+
+def _reason(
+    session: Session,
+    decision: Decision,
+    demand: dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+    supplies: dict[tuple[uuid.UUID, uuid.UUID], PairSupply],
+) -> str:
+    """Kalimat alasan untuk kartu keputusan — DITURUNKAN dari angka, bukan kolom dokumen.
+
+    `decisions` (Schema.md §3) tidak punya kolom alasan; yang disimpan adalah usulan agent dan
+    catatan Verifier. Karena itu kalimatnya dibangun dari defisit/surplus pasangan yang
+    bersangkutan, dan kalau tidak ada angkanya dipakai nama jenis keputusan apa adanya.
+    """
+    if decision.verifier_note:
+        return decision.verifier_note
+
+    commodity_row = session.get(Commodity, decision.commodity_id) if decision.commodity_id else None
+    commodity = commodity_row.name if commodity_row else "komoditas"
+    target = session.get(Location, decision.target_location_id) if decision.target_location_id else None
+    if target is not None and decision.commodity_id is not None:
+        pair = supplies.get((target.id, decision.commodity_id))
+        need = demand.get((target.id, decision.commodity_id), Decimal(0))
+        shortage = need - (pair.usable_kg if pair else Decimal(0))
+        if shortage > 0:
+            return f"Defisit {shortage:.0f} kg {commodity} di {target.name}"
+
+    source = session.get(Location, decision.source_location_id) if decision.source_location_id else None
+    if source is not None and decision.commodity_id is not None:
+        pair = supplies.get((source.id, decision.commodity_id))
+        if pair is not None and pair.usable_kg > 0:
+            return f"Surplus {pair.usable_kg:.0f} kg {commodity} di {source.name}"
+
+    return {
+        "regional_balance": "Ketidakseimbangan pasokan antar wilayah",
+        "price_anomaly": "Harga di luar rentang acuan pasar",
+        "safety_disruption": "Gangguan keamanan pangan terdeteksi",
+    }.get(decision.decision_type, "Menunggu penilaian")
+
+
+def build_recommendation(
+    session: Session,
+    decision: Decision,
+    now: datetime,
+    demand: dict[tuple[uuid.UUID, uuid.UUID], Decimal] | None = None,
+    supplies: dict[tuple[uuid.UUID, uuid.UUID], PairSupply] | None = None,
+) -> RecommendationOut:
+    """Petakan satu baris `decisions` (+ jejak auditnya) ke bentuk `Recommendation` UI."""
+    demand = _latest_demand(session) if demand is None else demand
+    supplies = _supply_by_pair(session, now) if supplies is None else supplies
+
+    approvals = session.execute(
+        select(Approval).where(Approval.decision_id == decision.id).order_by(Approval.approved_at)
+    ).scalars().all()
+    traces = session.execute(
+        select(AgentTrace).where(AgentTrace.decision_id == decision.id).order_by(AgentTrace.step_at)
+    ).scalars().all()
+    evidence = session.execute(
+        select(DecisionEvidence)
+        .where(DecisionEvidence.decision_id == decision.id)
+        .order_by(DecisionEvidence.recorded_at)
+    ).scalars().all()
+
+    approved_at = max((row.approved_at for row in approvals if row.approved), default=None)
+    # Waktu eksekusi diambil dari langkah ACT — kolomnya tidak ada, tapi langkahnya ada.
+    act_step = next((row.step_at for row in reversed(traces) if row.step_name == "ACT"), None)
+    executed_at = act_step if decision.status == "executed" else None
+
+    return RecommendationOut(
+        id=str(decision.id),
+        status=decision.status,
+        decision_type=cast(DecisionType, decision.decision_type),
+        source_location_id=str(decision.source_location_id or ""),
+        target_location_id=str(decision.target_location_id or ""),
+        commodity_id=str(decision.commodity_id or ""),
+        quantity_kg=float(decision.quantity_kg or 0),
+        safe_delivered_cost_breakdown=_cost_candidates(decision),
+        evidence=_evidence_summary(list(evidence)),
+        evidence_items=[
+            EvidenceItemOut(
+                id=str(item.id),
+                type=item.evidence_type,  # type: ignore[arg-type]
+                source=_evidence_source(
+                    item.evidence_type, item.payload if isinstance(item.payload, dict) else {}
+                ),
+                summary=_json_summary(item.payload),
+                recorded_at=item.recorded_at,
+                is_consistent=item.is_consistent,
+            )
+            for item in evidence
+        ],
+        verifier_note=decision.verifier_note,
+        verified_by=decision.verified_by,
+        safety_check=_safety_check(session, decision),
+        reason=_reason(session, decision, demand, supplies),
+        created_at=decision.created_at,
+        approved_at=approved_at,
+        expires_at=decision.expires_at,
+        executed_at=executed_at,
+        outcome=decision.outcome,  # type: ignore[arg-type]
+        sap_purchase_order=_purchase_order(session, decision),
+        agent_trace=[
+            AgentStepOut(
+                step=row.step_name,
+                tool=row.tool_called,
+                timestamp=row.step_at,
+                input_summary=_json_summary(row.input_summary),
+                output_summary=_json_summary(row.output_summary),
+                duration_ms=row.duration_ms,
+                step_at=row.step_at,
+            )
+            for row in traces
+        ],
+    )
+
+
+@router.get("/decisions", response_model=list[RecommendationOut])
+def list_decisions(
+    session: SessionDep,
+    _user: CurrentUser,
+    limit: int = 50,
+) -> list[RecommendationOut]:
+    """Daftar keputusan dalam bentuk yang dibaca UI (terbaru dulu)."""
+    now = _now()
+    demand = _latest_demand(session)
+    supplies = _supply_by_pair(session, now)
+    rows = session.scalars(
+        select(Decision).order_by(Decision.created_at.desc()).limit(limit)
+    ).all()
+    return [build_recommendation(session, row, now, demand, supplies) for row in rows]
+
+
+@router.get("/decisions/{decision_id}", response_model=RecommendationOut)
+def get_decision(session: SessionDep, _user: CurrentUser, decision_id: str) -> RecommendationOut:
+    """Satu keputusan lengkap dengan bukti, approval, dan jejak agennya."""
+    try:
+        parsed = uuid.UUID(decision_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"id keputusan bukan UUID: {decision_id!r}") from None
+
+    decision = session.get(Decision, parsed)
+    if decision is None:
+        raise HTTPException(status_code=404, detail=f"Keputusan tidak ditemukan: {decision_id}")
+    return build_recommendation(session, decision, _now())
+
+
+# --- KPI (Skill.md §4) -------------------------------------------------------------------------
+
+
+def _evidence_channel(kind: str) -> str:
+    """Kanal bukti untuk hitungan kelengkapan: SAP, IoT, atau fisik."""
+    if kind in _SAP_EVIDENCE:
+        return "sap"
+    if kind in _IOT_EVIDENCE:
+        return "iot"
+    if kind == "human_inspection":
+        return "physical"
+    return kind
+
+
+@router.get("/kpi", response_model=KpiSnapshotOut, response_model_exclude_none=True)
+def get_kpi(session: SessionDep, _user: CurrentUser) -> KpiSnapshotOut:
+    """KPI dari tabel operasional + alasan KPI yang tidak bisa dihitung (Skill.md §4).
+
+    Dihitung saat dibaca dari keputusan, bukti, jejak agen, dan sinyal harga. Belum ditulis ke
+    `kpi_snapshots` (job KPI belum ada), jadi tidak ada pembanding periode sebelumnya — itu sebabnya
+    `previous` tidak dikirim dan UI menampilkan "tanpa histori", bukan trend karangan.
+    """
+    decisions = list(session.scalars(select(Decision)))
+    traces = list(session.scalars(select(AgentTrace)))
+    evidence = list(session.scalars(select(DecisionEvidence)))
+    prices = list(session.scalars(select(PriceSignal)))
+
+    channels: dict[uuid.UUID, set[str]] = {}
+    for item in evidence:
+        channels.setdefault(item.decision_id, set()).add(_evidence_channel(item.evidence_type))
+    decide_duration: dict[uuid.UUID, int] = {
+        trace.decision_id: trace.duration_ms
+        for trace in traces
+        if trace.step_name == "DECIDE" and trace.duration_ms is not None
+    }
+
+    facts = [
+        DecisionFact(
+            decision_type=decision.decision_type,
+            status=decision.status,
+            safe_delivered_cost=(
+                _decimal(decision.safe_delivered_cost)
+                if decision.safe_delivered_cost is not None
+                else None
+            ),
+            evidence_channels=len(channels.get(decision.id, ())),
+            decide_duration_ms=decide_duration.get(decision.id),
+        )
+        for decision in decisions
+    ]
+    price_facts = [
+        PriceFact(
+            commodity_id=row.commodity_id,
+            price_per_kg=_decimal(row.price_per_kg),
+            source=row.source,
+        )
+        for row in prices
+    ]
+
+    values, unavailable = compute_kpi(facts, price_facts)
+    return KpiSnapshotOut(**values, unavailable=unavailable)

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { KPI_DEFINITIONS, formatKpiValue, kpiTrend, trendIsImprovement } from "./kpi";
+import {
+  KPI_DEFINITIONS,
+  formatKpiValue,
+  kpiLabel,
+  kpiTrend,
+  trendIsImprovement,
+} from "./kpi";
 
 /**
  * design.md §3.6: 7 KPI card, masing-masing angka besar + trend kecil
@@ -58,6 +64,19 @@ describe("formatKpiValue", () => {
     );
     expect(formatKpiValue("averageDecisionTimeMinutes", 18)).toBe("18 menit");
   });
+
+  it("tampil '—' kalau KPI belum bisa dihitung (bukan 0 yang terbaca seperti nol kejadian)", () => {
+    expect(formatKpiValue("mealContinuityRate", null)).toBe("—");
+    expect(formatKpiValue("avoidableFoodLossKg", undefined)).toBe("—");
+    expect(formatKpiValue("avoidableFoodLossRp", Number.NaN)).toBe("—");
+  });
+});
+
+describe("kpiLabel", () => {
+  it("memberi label untuk KPI yang tidak punya card sendiri (nilai rupiah food loss)", () => {
+    expect(kpiLabel("avoidableFoodLossRp")).toBe("Avoidable Food Loss (nilai Rp)");
+    expect(kpiLabel("mealContinuityRate")).toBe("Meal Continuity Rate");
+  });
 });
 
 describe("kpiTrend", () => {
@@ -83,6 +102,14 @@ describe("kpiTrend", () => {
     expect(trend.direction).toBe("flat");
     expect(trend.deltaAbs).toBe(0);
     expect(trend.deltaPercent).toBe(0);
+  });
+
+  it("flat kalau KPI belum bisa dihitung (nilai kosong) — trend tidak dikarang", () => {
+    for (const current of [null, undefined, Number.NaN]) {
+      const trend = kpiTrend(current, 90);
+      expect(trend.direction).toBe("flat");
+      expect(trend.deltaAbs).toBe(0);
+    }
   });
 
   it("tidak meledak saat nilai sebelumnya 0 (tidak bagi nol)", () => {

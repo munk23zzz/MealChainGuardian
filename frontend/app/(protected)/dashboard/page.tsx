@@ -308,7 +308,9 @@ export default function DashboardPage() {
           },
           {
             label: "Kelengkapan bukti",
-            value: kpi ? formatPercent(kpi.evidenceCompletenessPercent) : "—",
+            value: kpi?.evidenceCompletenessPercent != null
+              ? formatPercent(kpi.evidenceCompletenessPercent)
+              : "—",
             hint: "rata-rata semua keputusan",
             tone: "neutral",
           },

@@ -293,9 +293,15 @@ export type PreviousKpi = Partial<KPI>;
 /**
  * KPI + pembanding periode sebelumnya (sumber: `kpi_snapshots` di Schema.md §3,
  * diambil dari `computed_at` terakhir sebelum periode berjalan).
+ *
+ * Sebagian KPI bisa saja BELUM ada isinya: sumbernya (rencana menu, limbah) memang tidak
+ * tersimpan di skema. Field yang tidak ada berarti "belum bisa dihitung" — UI menampilkan "—",
+ * dan `unavailable` memuat alasannya. Nilai 0 hanya boleh berarti "nihil kejadian".
  */
-export interface KpiSnapshot extends KPI {
+export interface KpiSnapshot extends Partial<KPI> {
   previous?: PreviousKpi;
+  /** Alasan per KPI yang belum bisa dihitung backend (kunci sama dengan field KPI). */
+  unavailable?: Partial<Record<keyof KPI, string>>;
 }
 
 /** Pemasok (Schema.md §1 `suppliers`) — skor kepercayaan diperbarui lewat LEARN (Skill.md §10). */

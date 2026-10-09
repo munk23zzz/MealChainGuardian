@@ -14,12 +14,16 @@ export function KPICard({
   definition,
   value,
   trend,
+  unavailableReason,
 }: {
   definition: KpiDefinition;
-  value: number;
+  /** Kosong = KPI belum bisa dihitung backend; kartu menampilkan "—" + alasannya. */
+  value: number | null | undefined;
   trend: KpiTrend;
+  unavailableReason?: string;
 }) {
-  const improvement = trendIsImprovement(definition, trend);
+  const missing = value === null || value === undefined || !Number.isFinite(value);
+  const improvement = missing ? null : trendIsImprovement(definition, trend);
   const Icon =
     trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus;
 
@@ -38,27 +42,35 @@ export function KPICard({
           {formatKpiValue(definition.key, value)}
         </p>
         <p className="flex items-center gap-1.5 text-xs text-navy-900">
-          {improvement !== null && (
-            <span
-              aria-hidden
-              className={cn(
-                "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
-                improvement ? "bg-status-safe" : "bg-status-danger",
+          {missing ? (
+            <span className="text-muted-foreground">
+              {unavailableReason ?? "belum bisa dihitung — bukan 0"}
+            </span>
+          ) : (
+            <>
+              {improvement !== null && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+                    improvement ? "bg-status-safe" : "bg-status-danger",
+                  )}
+                />
               )}
-            />
+              <Icon
+                aria-hidden
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  improvement === true && "text-status-safe",
+                  improvement === false && "text-status-danger",
+                  improvement === null && "text-muted-foreground",
+                )}
+              />
+              <span className={cn(improvement === null && "text-muted-foreground")}>
+                {deltaLabel}
+              </span>
+            </>
           )}
-          <Icon
-            aria-hidden
-            className={cn(
-              "h-3.5 w-3.5 shrink-0",
-              improvement === true && "text-status-safe",
-              improvement === false && "text-status-danger",
-              improvement === null && "text-muted-foreground",
-            )}
-          />
-          <span className={cn(improvement === null && "text-muted-foreground")}>
-            {deltaLabel}
-          </span>
         </p>
         {/* `mt-auto` bikin keterangan selalu rata bawah walau tinggi kartu beda — grid jadi rapi. */}
         <p className="mt-auto pt-2 text-xs text-muted-foreground">
