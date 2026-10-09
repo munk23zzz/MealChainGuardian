@@ -801,6 +801,11 @@ export const MOCK_SUPPLIERS: Supplier[] = Object.entries(SUPPLIER_PROFILES).map(
     name: profile.name,
     locationId: profile.locationId,
     reliabilityScore: SUPPLIER_SCORE_DEFAULT,
+    // Status eksklusi dimulai bersih; `excludeSupplier()` di `lib/api.ts` yang mengubahnya,
+    // meniru tulisan yang di backend hanya terjadi setelah approval (Rules.md §1.2).
+    status: "active" as const,
+    excludedAt: null,
+    exclusionReason: null,
   }),
 );
 

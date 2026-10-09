@@ -144,8 +144,20 @@ def test_suppliers_use_the_ui_field_names(client):
     assert len(rows) == 3  # type: ignore[arg-type]
     assert {row["name"] for row in rows} == {"Supplier A", "Supplier B", "Supplier C"}  # type: ignore[union-attr]
     for row in rows:  # type: ignore[union-attr]
-        assert set(row) == {"id", "name", "locationId", "reliabilityScore"}
+        assert set(row) == {
+            "id",
+            "name",
+            "locationId",
+            "reliabilityScore",
+            "status",
+            "excludedAt",
+            "exclusionReason",
+        }
         assert row["reliabilityScore"] == 0.8
+        # Pemasok seed semuanya aktif; eksklusi hanya lewat approval (test_supplier_exclusion_api.py).
+        assert row["status"] == "active"
+        assert row["excludedAt"] is None
+        assert row["exclusionReason"] is None
 
 
 # --- Pasokan (bentuk SupplyRecord) -----------------------------------------------------------
@@ -365,6 +377,9 @@ def test_decision_uses_the_recommendation_shape(client):
         "expiresAt",
         "executedAt",
         "sapPurchaseOrder",
+        "supplierId",
+        "supplierName",
+        "exclusionReason",
         "agentTrace",
     }
     # Rujukan lokasi/komoditas harus ID (UI mencocokkan lewat id, bukan nama).

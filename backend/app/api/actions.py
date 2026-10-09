@@ -12,6 +12,11 @@ Aturan yang ditegakkan DI SINI (bukan di UI) — `docs/Schema.md` §3 & §6 dan 
    2026-10-05) dan keputusan yang lewat batas itu tidak bisa di-approve maupun dieksekusi.
    Kedaluwarsa bersifat TURUNAN dari waktu — status `expired` sudah dihapus dari kontrak, jadi
    tidak ada penulisan status saat batas terlewat (`docs/Schema.md` §3, revisi 9 Okt).
+4. **Eksklusi pemasok lewat approval (`Rules.md` §1.2).** Aksi berisiko tinggi ini tidak punya
+   tombol langsung: `POST /actions/propose` dengan `decision_type='supplier_exclusion'` mencatat
+   usulan (lokasi asal & tujuan diambil dari SPPG pemasok itu, supaya hanya SPPG-nya yang boleh
+   approve), dan `POST /actions/exclude` menulis eksklusinya — hanya kalau statusnya `approved`.
+   Alasan eksklusi WAJIB (`app/core/supplier_exclusion.py`).
 
 Inspeksi penerimaan (`/actions/receive`) dan pembaruan `reliability_score` sudah TIDAK ada:
 revisi dokumen 9 Okt menghapus `decisions.outcome` dan langkah penerimaan dari desain
@@ -57,6 +62,7 @@ from app.core.approval_rules import (
     required_approvals,
     validate_vote,
 )
+from app.core.supplier_exclusion import ExclusionRuleError, validate_request as validate_exclusion
 from app.models import (
     AgentTrace,
     Approval,
@@ -170,11 +176,17 @@ def _record_trace(
 
 
 class ProposeRequest(BaseModel):
-    decision_type: Literal["regional_balance", "price_anomaly", "safety_disruption"]
-    source_location: str
-    target_location: str = Field(description="SPPG penerima; hanya SPPG inilah yang boleh approve")
-    commodity: str
-    quantity_kg: Decimal = Field(gt=0)
+    decision_type: Literal[
+        "regional_balance", "price_anomaly", "safety_disruption", "supplier_exclusion"
+    ]
+    # Wajib untuk keputusan pasokan; untuk `supplier_exclusion` diambil dari baris pemasok
+    # (lokasi asal & tujuan = SPPG pemasok itu, supaya hanya SPPG-nya yang berhak approve).
+    source_location: str | None = None
+    target_location: str | None = Field(
+        default=None, description="SPPG penerima; hanya SPPG inilah yang boleh approve"
+    )
+    commodity: str | None = None
+    quantity_kg: Decimal | None = Field(default=None, gt=0)
     safe_delivered_cost: Decimal | None = Field(default=None, gt=0)
     cost_breakdown: dict[str, Any] | None = None
     expires_at: datetime | None = None
@@ -184,6 +196,13 @@ class ProposeRequest(BaseModel):
     )
     verifier_note: str | None = None
     proposed_by: str = "supervisor_agent"
+    # Khusus `supplier_exclusion`: pemasok yang diusulkan dikecualikan + alasannya (wajib).
+    supplier: str | None = Field(
+        default=None, description="id domain pemasok; wajib untuk decision_type='supplier_exclusion'"
+    )
+    reason: str | None = Field(
+        default=None, description="alasan eksklusi (wajib, minimal 10 karakter)"
+    )
 
 
 class ProposeResponse(BaseModel):
@@ -200,7 +219,53 @@ def propose(
 
     Belum menghitung apa pun: perhitungan kandidat/ongkos ada di `core/` + `/balance/*` +
     `/cost/*` yang belum dibangun. Endpoint ini mencatat keputusan yang sudah dihitung agent.
+
+    Dua bentuk:
+
+    * keputusan pasokan (`regional_balance`/`price_anomaly`/`safety_disruption`) — butuh lokasi
+      asal, lokasi tujuan, komoditas, dan jumlah;
+    * usulan eksklusi pemasok (`supplier_exclusion`) — butuh `supplier` + `reason`; lokasi asal dan
+      tujuan diambil dari SPPG pemasok itu supaya hanya SPPG-nya yang berhak approve
+      (`Rules.md` §1.2).
     """
+    decision = (
+        _propose_supplier_exclusion(session, payload, user)
+        if payload.decision_type == "supplier_exclusion"
+        else _propose_supply_decision(session, payload, user)
+    )
+
+    session.commit()
+    session.refresh(decision)
+    return ProposeResponse(decision=build_decision_out(session, decision))
+
+
+def _propose_supply_decision(
+    session: Session, payload: ProposeRequest, user: CurrentUser
+) -> Decision:
+    """Bentuk lama: keputusan pasokan dengan lokasi/komoditas/jumlah."""
+    missing = [
+        name
+        for name, value in (
+            ("source_location", payload.source_location),
+            ("target_location", payload.target_location),
+            ("commodity", payload.commodity),
+            ("quantity_kg", payload.quantity_kg),
+        )
+        if value is None or value == ""
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Tipe keputusan {payload.decision_type!r} butuh {', '.join(missing)}; "
+                "hanya 'supplier_exclusion' yang boleh mengosongkannya."
+            ),
+        )
+    assert payload.source_location is not None  # sempit untuk tipe checker; dijaga di atas
+    assert payload.target_location is not None
+    assert payload.commodity is not None
+    assert payload.quantity_kg is not None
+
     source = _resolve_location(session, payload.source_location)
     target = _resolve_location(session, payload.target_location)
     commodity = _resolve_commodity(session, payload.commodity)
@@ -246,10 +311,79 @@ def propose(
         },
         output_summary={"status": decision.status, "requested_by": user.email},
     )
+    return decision
 
-    session.commit()
-    session.refresh(decision)
-    return ProposeResponse(decision=build_decision_out(session, decision))
+
+def _propose_supplier_exclusion(
+    session: Session, payload: ProposeRequest, user: CurrentUser
+) -> Decision:
+    """Usulan eksklusi pemasok — aksi berisiko tinggi, jadi wajib beralasan dan beralur approval.
+
+    Dua hal yang sengaja BEDA dari keputusan pasokan:
+
+    * lokasi asal & tujuan = SPPG tempat pemasok itu terdaftar, sehingga aturan approval yang sudah
+      ada ("approver harus dari SPPG penerima") otomatis membatasi siapa yang boleh menyetujui;
+    * tanpa Verifier agent, usulan langsung masuk `pending_approval` (bukan `proposed`). Alasannya:
+      Verifier agent belum dibangun (P2.3), dan untuk aksi berisiko tinggi approval manusia-lah yang
+      memverifikasi. Kalau pemanggil menyatakan verifier `flagged`, statusnya `verifier_flagged`
+      seperti biasa (butuh dua approval).
+    """
+    if not payload.supplier:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "supplier_required",
+                "detail": "Usulan eksklusi wajib menyebut pemasoknya (id domain dari /ui/suppliers).",
+            },
+        )
+
+    supplier = _domain_supplier(session, payload.supplier)
+    try:
+        validate_exclusion(reason=payload.reason, supplier_status=supplier.status)
+    except ExclusionRuleError as exc:
+        raise HTTPException(
+            status_code=422, detail={"error": exc.code, "detail": exc.message}
+        ) from None
+
+    location = session.get(Location, supplier.location_id)
+    status = (
+        VERIFIER_RESULT_TO_STATUS["flagged"]
+        if payload.verifier_result == "flagged"
+        else "pending_approval"
+    )
+    now = _now()
+    decision = Decision(
+        decision_type="supplier_exclusion",
+        status=status,
+        expires_at=payload.expires_at or now + timedelta(hours=DEFAULT_DECISION_VALIDITY_HOURS),
+        proposed_by=payload.proposed_by,
+        verified_by=None,
+        verifier_note=payload.verifier_note,
+        supplier_id=supplier.id,
+        reason=(payload.reason or "").strip(),
+        source_location_id=location.id if location is not None else None,
+        target_location_id=location.id if location is not None else None,
+        commodity_id=None,
+        quantity_kg=None,
+        safe_delivered_cost=None,
+        cost_breakdown=None,
+    )
+    session.add(decision)
+    session.flush()
+
+    _record_trace(
+        session,
+        decision,
+        step_name="DECIDE",
+        tool_called="POST /actions/propose",
+        input_summary={
+            "decision_type": "supplier_exclusion",
+            "supplier": supplier.name,
+            "reason": decision.reason,
+        },
+        output_summary={"status": decision.status, "requested_by": user.email},
+    )
+    return decision
 
 
 # --- POST /actions/approve ---------------------------------------------------------------
@@ -513,6 +647,140 @@ def execute(
     return ExecuteResponse(
         purchase_order=_serialize_purchase_order(po, provider),
         decision=build_decision_out(session, decision),
+    )
+
+
+# --- POST /actions/exclude --------------------------------------------------------------
+
+
+class ExcludeRequest(BaseModel):
+    decision_id: str
+
+
+class ExcludeResponse(BaseModel):
+    decision: DecisionOut
+    supplier: dict[str, Any]
+
+
+@router.post("/exclude")
+def exclude_supplier(
+    payload: ExcludeRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> ExcludeResponse:
+    """Menulis eksklusi pemasok — HANYA setelah keputusan `supplier_exclusion` disetujui.
+
+    Ini penegakan `Rules.md` §1.2 ("mengeksklusi supplier WAJIB lewat `approvals` dengan
+    `approved = true` dulu"): satu-satunya pintu menuju `suppliers.status='excluded'` adalah
+    keputusan berstatus `approved`, dan status itu hanya lahir dari `/actions/approve`. Tidak ada
+    pemanggilan langsung dari UI tanpa approval.
+    """
+    decision = get_decision_or_404(session, payload.decision_id)
+    now = _now()
+
+    if decision.decision_type != "supplier_exclusion":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "not_supplier_exclusion",
+                "detail": (
+                    f"Keputusan ini bertipe {decision.decision_type!r}; endpoint ini hanya untuk "
+                    "'supplier_exclusion'. Pembelian dieksekusi lewat /actions/execute."
+                ),
+            },
+        )
+
+    if _is_expired(decision, now) and decision.status not in ("executed", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "decision_expired",
+                "detail": "Keputusan lewat masa berlaku, jadi eksklusinya tidak dieksekusi. "
+                "Supervisor harus mengusulkan ulang dengan alasan terbaru.",
+            },
+        )
+
+    if decision.status != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_auto_execute",
+                "detail": (
+                    f"Keputusan berstatus {decision.status!r} belum boleh dieksekusi. "
+                    "Eksklusi pemasok adalah aksi berisiko tinggi: ia hanya boleh ditulis setelah "
+                    "approval sah (Rules.md §1.2)."
+                ),
+            },
+        )
+
+    if decision.supplier_id is None:
+        # Dijaga CHECK constraint di skema; ini jaring kedua supaya pesannya jelas.
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "supplier_missing", "detail": "Keputusan eksklusi tanpa pemasok."},
+        )
+
+    supplier = session.get(Supplier, decision.supplier_id)
+    if supplier is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "supplier_not_found",
+                "detail": "Pemasok di keputusan ini sudah tidak ada di tabel suppliers.",
+            },
+        )
+
+    if supplier.status == "excluded":
+        excluded_at_text = (
+            supplier.excluded_at.isoformat() if supplier.excluded_at else "(waktu tidak tercatat)"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "already_excluded",
+                "detail": f"Pemasok {supplier.name!r} sudah dikecualikan pada {excluded_at_text}.",
+            },
+        )
+
+    supplier.status = "excluded"
+    supplier.excluded_at = now
+    supplier.exclusion_reason = decision.reason
+    decision.status = "executed"
+
+    session.add(
+        DecisionEvidence(
+            decision_id=decision.id,
+            evidence_type="supplier_exclusion",
+            payload={
+                "supplier_id": str(supplier.id),
+                "supplier": supplier.name,
+                "reason": decision.reason,
+                "approved_by": str(user.id),
+            },
+            is_consistent=None,
+            recorded_at=now,
+        )
+    )
+    _record_trace(
+        session,
+        decision,
+        step_name="ACT",
+        tool_called="POST /actions/exclude",
+        input_summary={"supplier": supplier.name, "reason": decision.reason},
+        output_summary={"supplier_status": supplier.status, "decided_by": user.email},
+    )
+
+    session.commit()
+    session.refresh(decision)
+    return ExcludeResponse(
+        decision=build_decision_out(session, decision),
+        supplier={
+            "id": str(supplier.id),
+            "name": supplier.name,
+            "status": supplier.status,
+            "excludedAt": supplier.excluded_at.isoformat() if supplier.excluded_at else None,
+            "exclusionReason": supplier.exclusion_reason,
+        },
     )
 
 

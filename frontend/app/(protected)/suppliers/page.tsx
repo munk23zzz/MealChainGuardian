@@ -1,15 +1,29 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { MetricStrip } from "@/components/ui/metric-strip";
 import { SkeletonCard } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { useLocations, useSuppliers } from "@/hooks/use-data";
 import { useAuth } from "@/contexts/auth";
+import { proposeSupplierExclusion } from "@/lib/api";
+import type { Supplier } from "@/lib/api/schema";
+import { formatDateTime } from "@/lib/format";
 import { scopeForRole } from "@/lib/role";
 import { isLocationInScope, scopeLabel } from "@/lib/scope";
 import { locationLabel } from "@/lib/labels";
@@ -40,7 +54,7 @@ export default function SuppliersPage() {
    * (`supplier.locationId`), jadi kepala/ahli gizi hanya melihat pemasok yang
    * memasok lokasi di wilayahnya, sementara monitor BGN melihat semuanya.
    */
-  const { role, region, locationId } = useAuth();
+  const { role, region, locationId, canApprove: userCanApprove } = useAuth();
   const roleScope = useMemo(
     () => scopeForRole(role, { region, locationId }),
     [role, region, locationId],
@@ -57,6 +71,37 @@ export default function SuppliersPage() {
     () => [...scopedSuppliers].sort((a, b) => a.reliabilityScore - b.reliabilityScore),
     [scopedSuppliers],
   );
+
+  /**
+   * Eksklusi pemasok (`Rules.md` §1.2). Dialog ini HANYA mengirim USULAN: yang tercatat adalah
+   * keputusan berstatus `pending_approval`, dan `suppliers.status` baru berubah setelah approver
+   * SPPG pemasok menyetujuinya di halaman Keputusan. Karena itu tombol di sini tidak pernah
+   * memakai kata "eksklusi sekarang".
+   */
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const [exclusionTarget, setExclusionTarget] = useState<Supplier | null>(null);
+  const [exclusionReason, setExclusionReason] = useState("");
+  const [exclusionError, setExclusionError] = useState<string | null>(null);
+
+  const exclusionMutation = useMutation({
+    mutationFn: () => proposeSupplierExclusion(exclusionTarget?.id ?? "", exclusionReason),
+    onSuccess: (decision) => {
+      setExclusionTarget(null);
+      setExclusionReason("");
+      setExclusionError(null);
+      void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+      void queryClient.invalidateQueries({ queryKey: ["decisions"] });
+      push({
+        title: "Usulan eksklusi tercatat",
+        description: `Keputusan ${decision.id} menunggu approval SPPG pemasok — eksklusi belum berlaku.`,
+        tone: "warning",
+      });
+    },
+    onError: (err: unknown) => {
+      setExclusionError(err instanceof Error ? err.message : "Gagal mengirim usulan");
+    },
+  });
 
   const metrics = useMemo(() => {
     const list = scopedSuppliers;
@@ -159,12 +204,19 @@ export default function SuppliersPage() {
                 className="animate-fade-up flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
               >
                 <span className="min-w-0">
-                  <span className="block truncate font-medium text-navy-900">
+                  <span className="flex items-center gap-2 truncate font-medium text-navy-900">
                     {s.name}
+                    {s.status === "excluded" && <Badge tone="danger">Dikecualikan</Badge>}
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {s.id} · {locationLabel(s.locationId, locations ?? [])}
                   </span>
+                  {s.status === "excluded" && (
+                    <span className="block text-xs text-status-danger">
+                      {s.exclusionReason ?? "alasan tercatat di keputusan"}
+                      {s.excludedAt ? ` · ${formatDateTime(s.excludedAt)}` : ""}
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span
@@ -181,6 +233,18 @@ export default function SuppliersPage() {
                   <span className="tabular-nums font-semibold text-navy-900">
                     {s.reliabilityScore.toFixed(2)}
                   </span>
+                  {s.status === "active" && userCanApprove && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setExclusionError(null);
+                        setExclusionReason("");
+                        setExclusionTarget(s);
+                      }}
+                    >
+                      Ajukan eksklusi
+                    </Button>
+                  )}
                 </span>
               </div>
             );
@@ -212,6 +276,56 @@ export default function SuppliersPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={exclusionTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setExclusionTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Ajukan eksklusi {exclusionTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              Usulan ini <strong>tidak</strong> langsung mengecualikan pemasok. Ia tercatat
+              sebagai keputusan dan baru berlaku setelah disetujui Kepala/Ahli Gizi SPPG
+              pemasok itu (Rules.md §1.2) — approver di luar SPPG tersebut akan ditolak.
+            </DialogDescription>
+          </DialogHeader>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="font-medium text-navy-900">Alasan eksklusi</span>
+            <textarea
+              value={exclusionReason}
+              onChange={(e) => setExclusionReason(e.target.value)}
+              placeholder="Contoh: dua pengiriman terakhir gagal inspeksi suhu"
+              className="min-h-24 rounded-md border border-input bg-background px-3 py-2 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">
+              Wajib diisi — alasan ini ikut tersimpan di keputusan dan dibaca approver.
+            </span>
+          </label>
+
+          {exclusionError && (
+            <p role="alert" className="text-status-danger">
+              {exclusionError}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExclusionTarget(null)}>
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => exclusionMutation.mutate()}
+              disabled={exclusionMutation.isPending || exclusionReason.trim().length < 10}
+            >
+              {exclusionMutation.isPending ? "Mengirim…" : "Kirim usulan eksklusi"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

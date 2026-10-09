@@ -98,6 +98,25 @@ def execute(client, headers, decision_id: str, supplier: str, net_price: float =
     )
 
 
+def propose_exclusion(
+    client,
+    headers,
+    supplier: str,
+    reason: str = "Dua pengiriman terakhir gagal inspeksi suhu dan mutu.",
+):
+    """Usulan eksklusi pemasok (`Rules.md` §1.2) — hanya MENCATAT, belum mengeksklusi."""
+    return client.post(
+        "/actions/propose",
+        json={"decision_type": "supplier_exclusion", "supplier": supplier, "reason": reason},
+        headers=headers,
+    )
+
+
+def exclude(client, headers, decision_id: str):
+    """Eksekusi eksklusi yang sudah disetujui (menulis `suppliers.status='excluded'`)."""
+    return client.post("/actions/exclude", json={"decision_id": decision_id}, headers=headers)
+
+
 def approved_decision(client, headers, supplier: str, **propose_overrides: Any) -> str:
     """Keputusan yang sudah dieksekusi — titik awal uji jalur aksi (dan pembuatan PO)."""
     decision_id = propose(client, headers, **propose_overrides).json()["decision"]["id"]

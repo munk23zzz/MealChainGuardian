@@ -242,3 +242,98 @@ export function getSuppliers(): Promise<Supplier[]> {
   if (USE_MOCK) return mockDelay(MOCK_SUPPLIERS.map((s) => ({ ...s })));
   return request<Supplier[]>("/ui/suppliers");
 }
+
+/** Panjang alasan eksklusi minimum — cerminan aturan backend (`app/core/supplier_exclusion.py`). */
+const MIN_EXCLUSION_REASON = 10;
+
+/**
+ * Usulan eksklusi pemasok (Rules.md §1.2) — HANYA mencatat usulan, belum mengubah pemasok.
+ *
+ * Di backend ini memanggil `/ui/actions/propose-exclusion`, yang memakai jalur keputusan yang sama
+ * dengan pembelian: keputusan berstatus `pending_approval`, dan approver yang sah adalah SPPG
+ * pemasok itu. Di mock mode keputusan tiruan ditambahkan ke daftar yang sama supaya alur
+ * approve → eksekusi bisa didemokan tanpa backend.
+ */
+export function proposeSupplierExclusion(
+  supplierId: string,
+  reason: string,
+): Promise<Recommendation> {
+  if (USE_MOCK) {
+    const supplier = MOCK_SUPPLIERS.find((s) => s.id === supplierId);
+    if (!supplier) return Promise.reject(new Error("Pemasok tidak ditemukan"));
+    if (supplier.status === "excluded") {
+      return Promise.reject(new Error(`${supplier.name} sudah dikecualikan.`));
+    }
+    if (reason.trim().length < MIN_EXCLUSION_REASON) {
+      return Promise.reject(
+        new Error(`Alasan eksklusi wajib diisi (minimal ${MIN_EXCLUSION_REASON} karakter).`),
+      );
+    }
+    const alasan = reason.trim();
+    const created: Recommendation = {
+      id: `dec-exclusion-${mockDecisions.length + 1}`,
+      decisionType: "supplier_exclusion",
+      status: "pending_approval",
+      sourceLocationId: supplier.locationId,
+      targetLocationId: supplier.locationId,
+      commodityId: "",
+      quantityKg: 0,
+      safeDeliveredCostBreakdown: [],
+      // Usulan eksklusi belum punya bukti apa pun; ini nilai kosong yang jujur, bukan angka karangan.
+      evidence: { sap: false, iot: false, physical: false, completenessPercent: 0, inconsistencies: [] },
+      safetyCheck: "PASS",
+      reason: `Usulan eksklusi ${supplier.name}: ${alasan}`,
+      createdAt: new Date().toISOString(),
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      exclusionReason: alasan,
+    };
+    mockDecisions.unshift(created);
+    return mockDelay({ ...created });
+  }
+  return request<Recommendation>("/ui/actions/propose-exclusion", {
+    method: "POST",
+    body: JSON.stringify({ supplierId, reason }),
+  });
+}
+
+/**
+ * Eksekusi eksklusi yang sudah di-approve — inilah titik `suppliers.status` berubah.
+ *
+ * Mock mode meniru aturan backend apa adanya: menolak sebelum `approved`, dan menolak keputusan
+ * yang bukan eksklusi pemasok.
+ */
+export function excludeSupplier(id: string): Promise<Recommendation> {
+  if (USE_MOCK) {
+    const idx = mockDecisions.findIndex((d) => d.id === id);
+    if (idx === -1) return Promise.reject(new Error("Decision tidak ditemukan"));
+    const decision = mockDecisions[idx];
+    if (decision.decisionType !== "supplier_exclusion") {
+      return Promise.reject(new Error("Keputusan ini bukan usulan eksklusi pemasok."));
+    }
+    if (decision.status !== "approved") {
+      return Promise.reject(
+        new Error("Eksklusi hanya berlaku setelah disetujui SPPG pemasok (Rules.md §1.2)."),
+      );
+    }
+    mockDecisions[idx] = {
+      ...decision,
+      status: "executed",
+      executedAt: new Date().toISOString(),
+    };
+    const supplierIdx = MOCK_SUPPLIERS.findIndex((s) => s.id === decision.supplierId);
+    if (supplierIdx !== -1) {
+      MOCK_SUPPLIERS[supplierIdx] = {
+        ...MOCK_SUPPLIERS[supplierIdx],
+        status: "excluded",
+        excludedAt: new Date().toISOString(),
+        exclusionReason: decision.exclusionReason ?? decision.reason,
+      };
+    }
+    return mockDelay({ ...mockDecisions[idx] });
+  }
+  return request<Recommendation>("/ui/actions/exclude", {
+    method: "POST",
+    body: JSON.stringify({ decisionId: id }),
+  });
+}

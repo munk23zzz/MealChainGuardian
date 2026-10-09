@@ -119,7 +119,10 @@ export default function DecisionDetailPage() {
           {actionable && <ExpiryCountdown expiresAt={decision.expiresAt} />}
         </div>
         <p className="mt-1 text-muted-foreground">
-          {DECISION_TYPE_LABELS[decision.decisionType]} · {comLabel(decision.commodityId)}{" "}
+          {DECISION_TYPE_LABELS[decision.decisionType]}
+          {decision.decisionType === "supplier_exclusion"
+            ? ` · ${decision.supplierName ?? "pemasok"}`
+            : ` · ${comLabel(decision.commodityId)}`}{" "}
           · dibuat {formatDateTime(decision.createdAt)}
         </p>
         {/* Dibuka dari tautan/riwayat di luar cakupan peran: katakan terus terang,
@@ -137,11 +140,18 @@ export default function DecisionDetailPage() {
       <MetricStrip
         className="animate-fade-up"
         items={[
-          {
-            label: "Kuantitas",
-            value: formatKg(decision.quantityKg),
-            hint: `dari ${label(decision.sourceLocationId)}`,
-          },
+          decision.decisionType === "supplier_exclusion"
+            ? {
+                label: "Pemasok diusulkan",
+                value: decision.supplierName ?? "-",
+                hint: decision.exclusionReason ?? "alasan tercatat di keputusan",
+                tone: "warning",
+              }
+            : {
+                label: "Kuantitas",
+                value: formatKg(decision.quantityKg),
+                hint: `dari ${label(decision.sourceLocationId)}`,
+              },
           {
             label: "Biaya kandidat terpilih",
             value: winner ? `${formatRupiah(winner.totalSafeDeliveredCostPerKg)}/kg` : "-",

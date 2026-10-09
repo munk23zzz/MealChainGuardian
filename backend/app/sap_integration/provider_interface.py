@@ -43,7 +43,11 @@ class DataSource(str, Enum):
 
 
 class SAPCapability(str, Enum):
-    """Saklar switch per kapabilitas — bukan satu saklar global (docs/Architecture.md §9.2)."""
+    """Kapabilitas SAP yang bisa di-switch sendiri-sendiri (docs/Architecture.md §9).
+
+    Ada juga saklar global `SAP_MODE` (`app/sap_integration/factory.py`): ia mengisi kapabilitas
+    yang env-nya sendiri tidak diisi, sementara `SAP_*_MODE` tetap menang untuk kapabilitas itu.
+    """
 
     MATERIAL_STOCK = "MATERIAL_STOCK"
     PURCHASE_ORDER = "PURCHASE_ORDER"

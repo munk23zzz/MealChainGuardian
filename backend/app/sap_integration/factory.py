@@ -1,15 +1,22 @@
-"""Factory provider SAP — switch PER KAPABILITAS, bukan satu saklar global (docs/Architecture.md §9.2).
+"""Factory provider SAP — switch PER KAPABILITAS, dengan satu saklar global opsional
+(docs/Architecture.md §9).
 
-Env yang dibaca (default `mock` untuk semuanya):
+Env yang dibaca:
 
-    SAP_MATERIAL_STOCK_MODE=mock|aws_mcp|odata
+    SAP_MODE=mock|aws_mcp|odata                      # default untuk SEMUA kapabilitas
+    SAP_MATERIAL_STOCK_MODE=mock|aws_mcp|odata       # menang atas SAP_MODE
     SAP_PURCHASE_ORDER_MODE=mock|aws_mcp|odata
     SAP_BUSINESS_PARTNER_MODE=mock|aws_mcp|odata
     SAP_PRODUCT_MASTER_MODE=mock|aws_mcp|odata
     SAP_MATERIAL_DOCUMENT_MODE=mock|aws_mcp|odata
 
+Urutan yang menang: env PER KAPABILITAS → `SAP_MODE` → default `mock`. Jadi "satu baris konfigurasi"
+yang dijanjikan dokumen memang berlaku (`SAP_MODE=aws_mcp` menyalakan jalur AWS untuk semua
+kapabilitas), sementara `SAP_MATERIAL_STOCK_MODE` tetap bisa menimpanya saat hanya satu kapabilitas
+yang boleh naik ke tenant nyata.
+
 `get_sap_provider()` mengembalikan router yang meneruskan tiap method ke provider yang dipilih untuk
-kapabilitasnya. Tidak ada kode di `core/`, `api/`, atau `agent/` yang berubah saat ini di-switch.
+kapabilitasnya. Tidak ada kode di `core/`, `api/`, atau `agent/` yang berubah saat mode di-switch.
 """
 
 from __future__ import annotations
@@ -41,7 +48,33 @@ CAPABILITY_ENV_VAR: Mapping[SAPCapability, str] = {
     SAPCapability.MATERIAL_DOCUMENT: "SAP_MATERIAL_DOCUMENT_MODE",
 }
 
+# Saklar global: dipakai kapabilitas yang env-nya sendiri tidak diisi. Inilah "satu baris" yang
+# disebut docs/Architecture.md §9 — per-kapabilitas tetap menang supaya bisa naik bertahap.
+GLOBAL_ENV_VAR = "SAP_MODE"
+
 DEFAULT_MODE = SAPMode.MOCK
+
+
+def resolve_mode(capability: SAPCapability, source: Mapping[str, str]) -> SAPMode:
+    """Mode untuk satu kapabilitas: env per-kapabilitas → `SAP_MODE` → `mock`.
+
+    Variabel yang ADA di env tapi nilainya tidak bisa dipakai (kosong atau salah tulis) DITOLAK,
+    bukan diam-diam jadi mock — kontrak yang sudah berlaku untuk `SAP_*_MODE` dan tetap dipegang
+    untuk `SAP_MODE`. Yang tidak ada sama sekali baru jatuh ke default.
+    """
+    var = CAPABILITY_ENV_VAR[capability]
+    used = var
+    raw = source.get(var)
+    if raw is None:
+        used = GLOBAL_ENV_VAR
+        raw = source.get(GLOBAL_ENV_VAR)
+    if raw is None:
+        return DEFAULT_MODE
+    try:
+        return SAPMode(raw.strip().lower())
+    except ValueError as exc:
+        valid = "|".join(m.value for m in SAPMode)
+        raise SAPProviderError(f"{used}={raw!r} tidak valid (pilihan: {valid})") from exc
 
 
 def build_provider(mode: SAPMode, *, mock_store: SapMockStore | None = None):
@@ -128,15 +161,11 @@ class SAPProviderRouter(SAPDataProvider):
 def get_sap_provider(
     env: Mapping[str, str] | None = None, *, mock_store: SapMockStore | None = None
 ) -> SAPProviderRouter:
-    """Bangun router dari env. Default semua kapabilitas = `mock`."""
+    """Bangun router dari env. Tiap kapabilitas: `SAP_*_MODE` → `SAP_MODE` → `mock`."""
     source = os.environ if env is None else env
     providers: dict[SAPCapability, object] = {}
-    for capability, var in CAPABILITY_ENV_VAR.items():
-        raw = source.get(var, DEFAULT_MODE.value)
-        try:
-            mode = SAPMode(raw.strip().lower())
-        except ValueError as exc:
-            valid = "|".join(m.value for m in SAPMode)
-            raise SAPProviderError(f"{var}={raw!r} tidak valid (pilihan: {valid})") from exc
-        providers[capability] = build_provider(mode, mock_store=mock_store)
+    for capability in CAPABILITY_ENV_VAR:
+        providers[capability] = build_provider(
+            resolve_mode(capability, source), mock_store=mock_store
+        )
     return SAPProviderRouter(providers)

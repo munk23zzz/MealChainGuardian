@@ -27,6 +27,7 @@ export const DECISION_TYPE_LABELS: Record<DecisionType, string> = {
   regional_balance: "Ketidakseimbangan regional",
   price_anomaly: "Anomali harga",
   safety_disruption: "Gangguan keamanan pangan",
+  supplier_exclusion: "Usulan eksklusi pemasok",
 };
 
 /** Label satu komoditas: pakai daftar dari backend, fallback ke map statis. */

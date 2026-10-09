@@ -17,7 +17,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, CreatedAt, UuidPk
 
-DECISION_TYPES = ("regional_balance", "price_anomaly", "safety_disruption")
+DECISION_TYPES = (
+    "regional_balance",
+    "price_anomaly",
+    "safety_disruption",
+    # Tipe baru (revisi 9 Okt): usulan mengeksklusi pemasok. `Rules.md` §1.2 menuntut aksi
+    # berisiko tinggi ini lewat approval dulu — jadi ia memakai jalur keputusan yang sama,
+    # bukan tombol langsung di UI.
+    "supplier_exclusion",
+)
 # docs/Schema.md §3 (revisi 9 Okt): status `verifier_unavailable` dan `expired` DIHAPUS dari
 # kontrak. Kedaluwarsa kini diturunkan dari `expires_at` (`now >= expires_at`), bukan status
 # tersimpan — supaya riwayat tidak perlu ditulis ulang hanya karena waktu berjalan.
@@ -37,6 +45,8 @@ EVIDENCE_TYPES = (
     "temperature",
     "human_inspection",
     "market_price",
+    # Bukti eksklusi pemasok: keputusan + approval yang menyetujuinya (revisi 9 Okt).
+    "supplier_exclusion",
 )
 APPROVER_ROLES = ("sppg_head", "sppg_nutritionist")
 
@@ -48,6 +58,13 @@ class Decision(Base):
             "status IN ('proposed','verifier_flagged','pending_approval',"
             "'approved','rejected','executed')",
             name="decisions_status_check",
+        ),
+        # Usulan eksklusi WAJIB menunjuk pemasok: tanpa itu tidak jelas siapa yang dieksklusi,
+        # dan eksekusinya akan menulis ke baris yang salah (invariant yang sama semangatnya
+        # dengan `price_signals.supplier_id`).
+        CheckConstraint(
+            "decision_type <> 'supplier_exclusion' OR supplier_id IS NOT NULL",
+            name="decisions_exclusion_supplier_check",
         ),
         Index("idx_decisions_status", "status"),
     )
@@ -61,6 +78,13 @@ class Decision(Base):
     )
     verified_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     verifier_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Usulan eksklusi pemasok (revisi 9 Okt). Terisi hanya untuk `supplier_exclusion`.
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True
+    )
+    # Alasan usulan yang dibaca approver. Untuk eksklusi ini WAJIB (dijaga
+    # `app/core/supplier_exclusion.py`), dan disalin ke `suppliers.exclusion_reason` saat eksekusi.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_location_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("locations.id"), nullable=True
     )

@@ -67,6 +67,9 @@ class DecisionOut(BaseModel):
     quantity_kg: Quantity | None
     safe_delivered_cost: Quantity | None
     cost_breakdown: dict | None
+    # Usulan eksklusi pemasok: id domain pemasok yang diusulkan + alasannya (revisi 9 Okt).
+    supplier: str | None = None
+    reason: str | None = None
     expires_at: datetime | None
     created_at: datetime
     approvals: list[ApprovalOut]
@@ -91,6 +94,16 @@ def _commodity_name(session: Session, commodity_id: uuid.UUID | None) -> str | N
 
     commodity = session.get(Commodity, commodity_id)
     return commodity.name if commodity else None
+
+
+def _supplier_name(session: Session, supplier_id: uuid.UUID | None) -> str | None:
+    """Nama pemasok untuk usulan eksklusi (`decision_type='supplier_exclusion'`)."""
+    if supplier_id is None:
+        return None
+    from app.models import Supplier
+
+    supplier = session.get(Supplier, supplier_id)
+    return supplier.name if supplier else None
 
 
 def _approval_rows(session: Session, decision_id: uuid.UUID) -> list[tuple[Approval, str]]:
@@ -153,6 +166,8 @@ def build_decision_out(session: Session, decision: Decision) -> DecisionOut:
         quantity_kg=decision.quantity_kg,
         safe_delivered_cost=decision.safe_delivered_cost,
         cost_breakdown=decision.cost_breakdown,
+        supplier=_supplier_name(session, decision.supplier_id),
+        reason=decision.reason,
         expires_at=decision.expires_at,
         created_at=decision.created_at,
         approvals=[

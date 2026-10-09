@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, CreatedAt, UuidPk
 
 USER_ROLES = ("sppg_head", "sppg_nutritionist", "bgn_monitor")
+
+# Status pemasok (revisi 9 Okt). `excluded` hanya boleh lahir dari keputusan
+# `supplier_exclusion` yang SUDAH disetujui (`Rules.md` §1.2: eksklusi wajib lewat approvals).
+SUPPLIER_STATUSES = ("active", "excluded")
 
 
 class Location(Base):
@@ -62,6 +67,16 @@ class Supplier(Base):
         CheckConstraint(
             "reliability_score >= 0 AND reliability_score <= 1", name="suppliers_reliability_check"
         ),
+        CheckConstraint(
+            "status IN ('active','excluded')",
+            name="suppliers_status_check",
+        ),
+        # Pemasok yang dikecualikan WAJIB punya waktu eksklusi: tanpa itu tidak ada bukti kapan
+        # dan atas dasar apa ia dikeluarkan (`Rules.md` §1.2).
+        CheckConstraint(
+            "status <> 'excluded' OR excluded_at IS NOT NULL",
+            name="suppliers_excluded_at_check",
+        ),
     )
 
     id: Mapped[UuidPk]
@@ -72,4 +87,12 @@ class Supplier(Base):
     reliability_score: Mapped[Decimal] = mapped_column(
         Numeric(3, 2), nullable=False, server_default="0.80"
     )
+    # `excluded` = tidak boleh lagi dipilih untuk PO (lihat `app/api/ui.py::_execute_defaults`
+    # dan `app/api/actions.py`), dan ditandai di UI. Diubah HANYA oleh eksekusi keputusan
+    # `supplier_exclusion` yang sudah disetujui.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Alasan disalin dari keputusan saat eksekusi, supaya riwayatnya terbaca dari baris pemasoknya
+    # sendiri (bukan hanya dari tabel keputusan yang bisa dipangkas).
+    exclusion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[CreatedAt]

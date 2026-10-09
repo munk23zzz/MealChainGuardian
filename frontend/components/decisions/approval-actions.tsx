@@ -17,7 +17,7 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/contexts/auth";
 import { useToast } from "@/components/ui/toast";
-import { approveDecision, executeDecision, rejectDecision } from "@/lib/api";
+import { approveDecision, excludeSupplier, executeDecision, rejectDecision } from "@/lib/api";
 import { approvalDenialReason, canApproveForLocation } from "@/lib/auth";
 import { expiryState } from "@/lib/expiry";
 import type { Recommendation } from "@/lib/api/schema";
@@ -55,6 +55,10 @@ export function ApprovalActions({
     void queryClient.invalidateQueries({ queryKey: ["decisions"] });
   };
 
+  // Usulan eksklusi pemasok dieksekusi lewat aksi lain daripada pembelian: yang berubah
+  // `suppliers.status`, bukan purchase order (Rules.md §1.2).
+  const isExclusion = recommendation.decisionType === "supplier_exclusion";
+
   const approveMutation = useMutation({
     mutationFn: () => approveDecision(recommendation.id),
     onSuccess: () => {
@@ -74,10 +78,23 @@ export function ApprovalActions({
   });
 
   const executeMutation = useMutation({
-    mutationFn: () => executeDecision(recommendation.id),
+    // Eksklusi pemasok dieksekusi lewat pintu sendiri (`/ui/actions/exclude`), bukan lewat SAP:
+    // yang berubah adalah `suppliers.status`, bukan purchase order.
+    mutationFn: () =>
+      isExclusion ? excludeSupplier(recommendation.id) : executeDecision(recommendation.id),
     onSuccess: () => {
       setError(null);
       invalidate();
+      if (isExclusion) {
+        push({
+          title: "Eksklusi pemasok berlaku",
+          description: `${
+            recommendation.supplierName ?? "Pemasok"
+          } tidak lagi dipilih untuk purchase order berikutnya.`,
+          tone: "success",
+        });
+        return;
+      }
       push({
         title: "Diteruskan ke SAP (mock)",
         description: recommendation.sapPurchaseOrder
@@ -219,7 +236,9 @@ export function ApprovalActions({
             <Factory className="h-4 w-4" />
             {executeMutation.isPending
               ? "Mengeksekusi…"
-              : "Eksekusi ke SAP (mock)"}
+              : isExclusion
+                ? "Berlakukan eksklusi"
+                : "Eksekusi ke SAP (mock)"}
           </Button>
         )}
       </div>

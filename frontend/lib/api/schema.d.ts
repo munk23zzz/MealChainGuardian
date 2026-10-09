@@ -47,7 +47,9 @@ export type DecisionStatus =
 export type DecisionType =
   | "regional_balance"
   | "price_anomaly"
-  | "safety_disruption";
+  | "safety_disruption"
+  /** Usulan mengeksklusi pemasok — aksi berisiko tinggi, wajib lewat approval (Rules.md §1.2). */
+  | "supplier_exclusion";
 
 /** Hard constraint yang diperiksa sebelum kandidat boleh muncul (Skill.md §2). */
 export type ConstraintName =
@@ -238,6 +240,12 @@ export interface Recommendation {
   executedAt?: string;
   /** Purchase order di SAP (mock) yang lahir dari approval keputusan ini. */
   sapPurchaseOrder?: SapPurchaseOrder;
+  /** Pemasok yang diusulkan/dikecualikan — hanya ada untuk `supplier_exclusion` (backend: `null` untuk tipe lain). */
+  supplierId?: string | null;
+  /** Nama pemasok tersebut, supaya UI tidak perlu membuka tabel lain. */
+  supplierName?: string | null;
+  /** Alasan usulan eksklusi, apa adanya dari `decisions.reason`. */
+  exclusionReason?: string | null;
   agentTrace?: AgentStep[];
 }
 
@@ -304,6 +312,14 @@ export interface Supplier {
   locationId: string;
   /** 0..1, DEFAULT 0.80 di DB (Schema.md §1 `suppliers.reliability_score`). */
   reliabilityScore: number;
+  /**
+   * `active` | `excluded`. Eksklusi hanya lahir dari keputusan yang disetujui
+   * (Rules.md §1.2) — UI tidak pernah mengubah kolom ini sendiri.
+   */
+  status: "active" | "excluded";
+  /** Waktu eksklusi berlaku (backend: wajib terisi saat `status = "excluded"`). */
+  excludedAt: string | null;
+  exclusionReason: string | null;
 }
 
 /** Request body untuk login. */

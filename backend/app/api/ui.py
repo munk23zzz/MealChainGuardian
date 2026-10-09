@@ -58,10 +58,14 @@ from app.models import (
 )
 from app.api.actions import (
     ApproveRequest,
+    ExcludeRequest,
     ExecuteRequest,
+    ProposeRequest,
     approve,
+    exclude_supplier,
     execute,
     get_decision_or_404,
+    propose,
 )
 from app.api.supply import get_provider
 from app.core.kpi import DecisionFact, PriceFact, compute_kpi
@@ -83,8 +87,11 @@ EvidenceType = Literal[
     "temperature",
     "human_inspection",
     "market_price",
+    "supplier_exclusion",
 ]
-DecisionType = Literal["regional_balance", "price_anomaly", "safety_disruption"]
+DecisionType = Literal[
+    "regional_balance", "price_anomaly", "safety_disruption", "supplier_exclusion"
+]
 
 EVIDENCE_LABELS: dict[str, str] = {
     "sap_purchase_order": "SAP — purchase order",
@@ -93,6 +100,7 @@ EVIDENCE_LABELS: dict[str, str] = {
     "temperature": "Suhu (sensor IoT)",
     "human_inspection": "Inspeksi fisik petugas",
     "market_price": "Harga pasar (referensi)",
+    "supplier_exclusion": "Keputusan eksklusi pemasok",
 }
 
 # Tiga kanal bukti yang diminta Skill.md §4 untuk KPI kelengkapan bukti (SAP + IoT + fisik).
@@ -161,6 +169,11 @@ class SupplierOut(BaseModel):
     name: str
     location_id: str = Field(serialization_alias="locationId")
     reliability_score: float = Field(serialization_alias="reliabilityScore")
+    # Status eksklusi (revisi 9 Okt). Pemasok `excluded` tidak boleh dipilih untuk PO lagi, dan UI
+    # menampilkannya sebagai penanda — bukan disembunyikan, supaya keputusan itu tetap bisa diaudit.
+    status: str = "active"
+    excluded_at: datetime | None = Field(default=None, serialization_alias="excludedAt")
+    exclusion_reason: str | None = Field(default=None, serialization_alias="exclusionReason")
 
 
 class CostCandidateOut(BaseModel):
@@ -292,6 +305,11 @@ class RecommendationOut(BaseModel):
     sap_purchase_order: SapPurchaseOrderOut | None = Field(
         default=None, serialization_alias="sapPurchaseOrder"
     )
+    # Eksklusi pemasok (revisi 9 Okt): hanya terisi untuk `decisionType == "supplier_exclusion"`,
+    # supaya UI bisa menampilkan pemasok + alasannya tanpa membuka tabel lain.
+    supplier_id: str | None = Field(default=None, serialization_alias="supplierId")
+    supplier_name: str | None = Field(default=None, serialization_alias="supplierName")
+    exclusion_reason: str | None = Field(default=None, serialization_alias="exclusionReason")
     agent_trace: list[AgentStepOut] = Field(default=[], serialization_alias="agentTrace")
 
 
@@ -635,6 +653,9 @@ def list_suppliers(session: SessionDep, _user: CurrentUser) -> list[SupplierOut]
             name=row.name,
             location_id=str(row.location_id),
             reliability_score=float(row.reliability_score),
+            status=row.status,
+            excluded_at=row.excluded_at,
+            exclusion_reason=row.exclusion_reason,
         )
         for row in rows
     ]
@@ -795,6 +816,14 @@ def _purchase_order(session: Session, decision: Decision) -> SapPurchaseOrderOut
     )
 
 
+def _supplier_name(session: Session, decision: Decision) -> str | None:
+    """Nama pemasok yang diusulkan dikecualikan (`supplier_exclusion`), kalau keputusannya begitu."""
+    if decision.decision_type != "supplier_exclusion" or decision.supplier_id is None:
+        return None
+    supplier = session.get(Supplier, decision.supplier_id)
+    return supplier.name if supplier is not None else None
+
+
 def _reason(
     session: Session,
     decision: Decision,
@@ -809,6 +838,15 @@ def _reason(
     """
     if decision.verifier_note:
         return decision.verifier_note
+
+    # Usulan eksklusi pemasok tidak punya komoditas/kuantitas, jadi kalimatnya dari baris pemasok
+    # itu sendiri — bukan dari defisit/surplus yang tidak relevan.
+    if decision.decision_type == "supplier_exclusion":
+        supplier = session.get(Supplier, decision.supplier_id) if decision.supplier_id else None
+        name = supplier.name if supplier else "pemasok"
+        if decision.reason:
+            return f"Usulan eksklusi {name}: {decision.reason}"
+        return f"Usulan eksklusi {name}"
 
     commodity_row = session.get(Commodity, decision.commodity_id) if decision.commodity_id else None
     commodity = commodity_row.name if commodity_row else "komoditas"
@@ -893,6 +931,9 @@ def build_recommendation(
         expires_at=decision.expires_at,
         executed_at=executed_at,
         sap_purchase_order=_purchase_order(session, decision),
+        supplier_id=str(decision.supplier_id) if decision.supplier_id else None,
+        supplier_name=_supplier_name(session, decision),
+        exclusion_reason=decision.reason if decision.decision_type == "supplier_exclusion" else None,
         agent_trace=[
             AgentStepOut(
                 step=row.step_name,
@@ -1024,6 +1065,16 @@ class UiRejectRequest(UiDecisionRequest):
     reason: str | None = None
 
 
+class UiExclusionRequest(BaseModel):
+    """Body UI untuk MENGUSULKAN eksklusi pemasok (halaman `/suppliers`)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    supplier_id: str = Field(alias="supplierId")
+    reason: str = Field(description="alasan eksklusi; wajib, diperiksa core/supplier_exclusion.py")
+    note: str | None = Field(default=None, description="catatan tambahan untuk approver")
+
+
 def _execute_defaults(session: Session, decision: Decision) -> tuple[str, Decimal]:
     """Pemasok + harga total PO untuk jalur UI — keduanya diambil dari data nyata.
 
@@ -1031,7 +1082,9 @@ def _execute_defaults(session: Session, decision: Decision) -> tuple[str, Decima
     jalur ini memakai aturan yang jelas dan bisa diperiksa:
 
     * pemasok = skor kepercayaan TERTINGGI di lokasi asal keputusan; kalau tidak ada pemasok di
-      sana, tertinggi keseluruhan;
+      sana, tertinggi keseluruhan. Pemasok yang SUDAH dikecualikan (`suppliers.status='excluded'`)
+      tidak pernah dipilih — aturan eksklusi hanya bermakna kalau pemilihannya menghormatinya
+      (`app/core/supplier_exclusion.py`, `Rules.md` §1.2);
     * harga total = harga terbaru komoditas itu di lokasi asal x kuantitas keputusan; kalau belum
       ada sinyal harga, pakai `safe_delivered_cost` keputusan apa adanya.
 
@@ -1041,15 +1094,22 @@ def _execute_defaults(session: Session, decision: Decision) -> tuple[str, Decima
     supplier = session.scalar(
         select(Supplier)
         .where(Supplier.location_id == decision.source_location_id)
+        .where(Supplier.status == "active")
         .order_by(Supplier.reliability_score.desc(), Supplier.name)
     )
     if supplier is None:
         supplier = session.scalar(
-            select(Supplier).order_by(Supplier.reliability_score.desc(), Supplier.name)
+            select(Supplier)
+            .where(Supplier.status == "active")
+            .order_by(Supplier.reliability_score.desc(), Supplier.name)
         )
     if supplier is None:
         raise HTTPException(
-            status_code=409, detail="Belum ada pemasok di basis data, jadi PO tidak bisa dibuat."
+            status_code=409,
+            detail=(
+                "Tidak ada pemasok aktif di basis data, jadi PO tidak bisa dibuat. "
+                "Pemasok yang dikecualikan sengaja tidak dipakai."
+            ),
         )
 
     price = session.scalar(
@@ -1100,6 +1160,46 @@ def ui_reject(
         session,
         user,
     )
+    return build_recommendation(
+        session, get_decision_or_404(session, payload.decision_id), _now()
+    )
+
+
+@router.post("/actions/propose-exclusion", response_model=RecommendationOut, status_code=201)
+def ui_propose_exclusion(
+    payload: UiExclusionRequest, session: SessionDep, user: CurrentUser
+) -> RecommendationOut:
+    """Ajukan eksklusi pemasok dari UI (halaman `/suppliers`) — hanya MENCATAT usulan.
+
+    Belum ada penulisan ke `suppliers` di sini: eksklusi baru berlaku setelah approver SPPG pemasok
+    itu menyetujui (`/ui/actions/approve`) dan keputusannya dieksekusi (`/ui/actions/exclude`) —
+    `Rules.md` §1.2. Endpoint ini hanya meneruskan ke `POST /actions/propose` domain, jadi aturan
+    alasan & status tetap satu tempat.
+    """
+    response = propose(
+        ProposeRequest(
+            decision_type="supplier_exclusion",
+            supplier=payload.supplier_id,
+            reason=payload.reason,
+            proposed_by=user.email,
+            verifier_note=payload.note,
+        ),
+        session,
+        user,
+    )
+    return build_recommendation(session, get_decision_or_404(session, str(response.decision.id)), _now())
+
+
+@router.post("/actions/exclude", response_model=RecommendationOut)
+def ui_exclude(
+    payload: UiDecisionRequest, session: SessionDep, user: CurrentUser
+) -> RecommendationOut:
+    """Eksekusi eksklusi yang SUDAH disetujui (menulis `suppliers.status='excluded'`).
+
+    Meneruskan ke `POST /actions/exclude` domain — penjaga "tidak ada auto-execute" ada di sana,
+    bukan diduplikasi di sini.
+    """
+    exclude_supplier(ExcludeRequest(decision_id=payload.decision_id), session, user)
     return build_recommendation(
         session, get_decision_or_404(session, payload.decision_id), _now()
     )
