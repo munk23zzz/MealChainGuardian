@@ -75,9 +75,6 @@ export default function LoginPage() {
             <ShieldCheck className="h-6 w-6 shrink-0" aria-hidden />
             MealChain Guardian
           </h2>
-          <p className="mt-3 max-w-md text-white/85">
-            Rantai pasokan pangan yang bisa dipertanggungjawabkan.
-          </p>
         </div>
       </aside>
 
@@ -200,15 +197,6 @@ export default function LoginPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Password demo:{" "}
-              {DEMO_ACCOUNTS.map((account, index) => (
-                <span key={account.username}>
-                  {index > 0 && " · "}
-                  <span className="font-mono">{account.password}</span>
-                </span>
-              ))}
-            </p>
           </div>
         </div>
       </main>

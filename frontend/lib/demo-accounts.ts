@@ -6,7 +6,9 @@
  * `NEXT_PUBLIC_USE_MOCK=false`, email yang berbeda = login gagal tepat di depan juri.
  * `lib/demo-accounts.test.ts` menahan daftar ini agar tidak menyimpang dari mock & dokumen.
  *
- * Password demo BUKAN rahasia: nilainya memang ditampilkan di halaman login (docs/design.md §1.5).
+ * Password demo dipakai tombol "masuk cepat" (satu klik). Sejak 9 Okt nilainya TIDAK lagi dicetak
+ * di halaman login atas permintaan pemilik proyek; `docs/design.md` §1.5 hanya mengatur
+ * peran/cakupan akun, bukan penayangan password.
  */
 export type DemoAccount = {
   /** Peran mesin (`JwtPayload["role"]`) — dipakai test untuk mencocokkan mock & backend. */
