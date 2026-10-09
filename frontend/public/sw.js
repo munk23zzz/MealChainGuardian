@@ -7,8 +7,11 @@
  * - Aset statis (CSS/JS/ikon): cache-first, lalu simpan salinan.
  * Hanya GET ke origin sendiri yang ditangani; sisanya dibiarkan apa adanya.
  */
-const CACHE = "mealchain-shell-v1";
-const SHELL = ["/dashboard", "/manifest.webmanifest", "/icons/icon-192.png"];
+const CACHE = "mealchain-shell-v2";
+// Base path diturunkan dari lokasi skrip ini sendiri: service worker tidak punya
+// process.env, dan di GitHub Pages aplikasi disajikan di /<repo>/, bukan di akar domain.
+const BASE = new URL(self.location.href).pathname.replace(/\/sw\.js$/, "");
+const SHELL = [`${BASE}/dashboard/`, `${BASE}/manifest.webmanifest`, `${BASE}/icons/icon-192.png`];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -53,7 +56,7 @@ self.addEventListener("fetch", (event) => {
         .catch(() =>
           caches
             .match(request)
-            .then((hit) => hit || caches.match("/dashboard"))
+            .then((hit) => hit || caches.match(`${BASE}/dashboard/`))
             .then((hit) => hit || Response.error()),
         ),
     );

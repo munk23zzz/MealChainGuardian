@@ -12,8 +12,18 @@ import { formatKg } from "@/lib/format";
  * Worker MapLibre disajikan sebagai file statis dari /public (disalin oleh
  * scripts/copy-maplibre-worker.mjs saat predev/prebuild). Tanpa ini, webpack
  * gagal memuat worker dan peta tidak merender tile.
+ *
+ * Path WAJIB ikut base path: di GitHub Pages aplikasi disajikan di
+ * /<repo>/, jadi "/maplibre-gl-worker.mjs" akan 404 dan peta kosong.
  */
-setWorkerUrl("/maplibre-gl-worker.mjs");
+setWorkerUrl(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/maplibre-gl-worker.mjs`);
+
+/**
+ * Base path aplikasi ("" di lokal, "/MealChainGuardian" di GitHub Pages).
+ * Dipakai untuk tautan yang ditulis sebagai string HTML mentah (popup peta) —
+ * tautan JSX tidak perlu ini karena `next/link` sudah menambahkan base path.
+ */
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /**
  * Titik awal peta: 10 lokasi demo semuanya di Jabodetabek/Cianjur, jadi peta
@@ -54,7 +64,7 @@ function popupHtml(
         locationStatusLabel(location.status),
       )}</div>
       ${lines ? `<ul style="margin:6px 0 0;padding:0;list-style:none">${lines}</ul>` : ""}
-      <a href="/decisions?location=${encodeURIComponent(location.id)}"
+      <a href="${BASE_PATH}/decisions?location=${encodeURIComponent(location.id)}"
          style="display:inline-block;margin-top:8px;color:${PALETTE.brandBlue};font-weight:600">
         Lihat keputusan lokasi ini
       </a>

@@ -16,12 +16,17 @@ const inter = Inter({
   display: "swap",
 });
 
+// Base path aplikasi ("" di lokal, "/MealChainGuardian" di GitHub Pages).
+// Metadata URL TIDAK otomatis diberi base path oleh Next (berbeda dari `next/link`),
+// jadi manifest ditulis lengkap di sini.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export const metadata: Metadata = {
   title: "MealChain Guardian",
   description:
     "Dashboard guardian untuk kontinuitas pasokan pangan institusional",
   applicationName: "MealChain Guardian",
-  manifest: "/manifest.webmanifest",
+  manifest: `${BASE_PATH}/manifest.webmanifest`,
 };
 
 /**

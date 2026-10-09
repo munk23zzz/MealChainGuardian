@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 import { RecommendationCard } from "@/components/decisions/recommendation-card";
@@ -199,9 +200,9 @@ function DecisionsPageInner() {
                 {locationLabel(locationFilter, locations)}
               </strong>
             </p>
-            <a href="/decisions" className="text-brand hover:underline">
+            <Link href="/decisions" className="text-brand hover:underline">
               Tampilkan semua lokasi
-            </a>
+            </Link>
           </CardContent>
         </Card>
       )}

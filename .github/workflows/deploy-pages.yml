@@ -1,0 +1,100 @@
+# =============================================================================
+# MealChain Guardian — publikasi demo statis ke GitHub Pages
+# =============================================================================
+# Demo ini SENGAJA statis: UI berjalan di mode mock (NEXT_PUBLIC_USE_MOCK=true),
+# jadi bisa dibuka juri tanpa server, tanpa backend, tanpa database.
+#
+# Kenapa tidak ada backend di sini: GitHub Pages hanya menyajikan berkas statis.
+# Backend FastAPI + Postgres hidup di tempat lain (lokal/VPS) dan diuji terpisah
+# oleh `backend/tests`.
+#
+# Sekali setup: Settings → Pages → Source: "GitHub Actions".
+name: Deploy demo ke GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Satu deploy berjalan sekali; push berikutnya membatalkan yang masih jalan.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (npm ci)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test (vitest)
+        working-directory: frontend
+        run: npm test
+
+      - name: Build ekspor statis
+        working-directory: frontend
+        env:
+          STATIC_EXPORT: "true"
+          # Pages menyajikan repo di sub-path, bukan di akar domain.
+          NEXT_PUBLIC_BASE_PATH: /MealChainGuardian
+          # UI memakai data mock: tidak ada panggilan ke backend sama sekali.
+          NEXT_PUBLIC_USE_MOCK: "true"
+        run: npm run build
+
+      - name: Pastikan rute penting benar-benar terekspor
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          for path in \
+            out/index.html \
+            out/login/index.html \
+            out/dashboard/index.html \
+            out/decisions/index.html \
+            out/decisions/dec-001/index.html \
+            out/suppliers/index.html \
+            out/sw.js \
+            out/manifest.webmanifest
+          do
+            test -f "$path" || { echo "HILANG: $path"; exit 1; }
+            echo "ok $path"
+          done
+
+      - name: .nojekyll (Pages tidak boleh memproses folder _next/)
+        working-directory: frontend
+        run: touch out/.nojekyll
+
+      - name: Konfigurasi Pages
+        uses: actions/configure-pages@v5
+
+      - name: Unggah artefak
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy ke GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

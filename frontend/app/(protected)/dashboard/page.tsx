@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Lock, ShieldCheck } from "lucide-react";
 import { MapView } from "@/components/map/map-view";
 import { SupplyDemandChart } from "@/components/charts/supply-demand-chart";
@@ -465,9 +466,9 @@ export default function DashboardPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold text-navy-900">Rekomendasi menunggu</h2>
-          <a href="/decisions" className="text-brand hover:underline">
+          <Link href="/decisions" className="text-brand hover:underline">
             Lihat semua
-          </a>
+          </Link>
         </div>
         {isLoading ? (
           <SkeletonRows rows={2} />
