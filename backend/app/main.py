@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import actions, auth, decisions, supply
+from app.api import actions, auth, decisions, supply, ui
 from app.config import cors_origins
 from app.sap_integration.factory import get_sap_provider
 from app.sap_integration.mapping import UnmappedSapValueError
@@ -31,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(supply.router)
+app.include_router(ui.router)
 app.include_router(auth.router)
 app.include_router(decisions.router)
 app.include_router(actions.router)
