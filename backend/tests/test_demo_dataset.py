@@ -172,6 +172,9 @@ def test_failed_and_excursing_batches_are_seeded_as_described(db_factory):
             b for b in batches if any(float(entry["celsius"]) > 4.0 for entry in b.temperature_log)
         ]
 
+    # Kasus merah harus tetap ada datanya: satu batch gagal aman (Jakarta Selatan) dan satu titik
+    # penyimpangan suhu rantai dingin (Jakarta Utara). Jangan dilonggarkan jadi "> 0" — kalau ada
+    # yang menghapus barisnya, nama lokasinya tidak lagi cocok dengan narasi demo.
     assert [names[b.location_id] for b in failed] == ["SPPG Jakarta Selatan"]
     assert all(b.usable_until < now for b in failed), "batch gagal aman harus sudah lewat masa pakai"
     # Titik itu punya 2 batch, jadi keduanya harus menyimpang — bukan hanya satu.
