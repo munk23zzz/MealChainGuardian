@@ -131,7 +131,7 @@ export function SupplierDetailPanel({
               return (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border bg-card px-4 py-3">
-                    <Baris label="Batch yang dipasok" value={ringkas.batchCount} />
+                    <Baris label="Batch tercatat" value={ringkas.batchCount} />
                     <Baris label="Total volume" value={formatKg(ringkas.totalQuantityKg)} />
                     <Baris
                       label="Skor kesegaran terendah"
