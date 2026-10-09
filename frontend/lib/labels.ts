@@ -15,12 +15,24 @@ import type {
 
 /** Cadangan kalau daftar komoditas dari backend belum tersedia. */
 export const COMMODITY_LABELS: Record<string, string> = {
+  "com-beras": "Beras",
   "com-telur": "Telur",
   "com-ayam": "Ayam",
+  "com-ikan": "Ikan",
+  "com-tempe": "Tempe",
+  "com-tahu": "Tahu",
   "com-wortel": "Wortel",
+  "com-bayam": "Bayam",
+  "com-pisang": "Pisang",
+  beras: "Beras",
   telur: "Telur",
   ayam: "Ayam",
+  ikan: "Ikan",
+  tempe: "Tempe",
+  tahu: "Tahu",
   wortel: "Wortel",
+  bayam: "Bayam",
+  pisang: "Pisang",
 };
 
 export const DECISION_TYPE_LABELS: Record<DecisionType, string> = {
