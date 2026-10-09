@@ -44,6 +44,14 @@ const ICON_BY_HREF: Record<string, typeof LayoutDashboard> = {
   "/sources": Database,
 };
 
+/**
+ * Aset logo rail. `logo-mark.png` sudah dipangkas ke batas alfa-nya, sedangkan `logo.png`
+ * (500x500) menyisakan margin kosong ~54% sehingga pada kotak 28px tandanya hanya ter-render
+ * ~13px dan terbaca seperti kotak kosong. Base path ditulis manual: `next/image` tidak
+ * menambahkannya untuk aset `public/` saat ekspor statis.
+ */
+const LOGO_MARK = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/img/logo-mark.png`;
+
 export function Sidebar() {
   const pathname = usePathname();
   const { isOpen, toggle } = useSidebar();
@@ -110,36 +118,46 @@ export function Sidebar() {
             : cn("sticky top-0 h-screen", isOpen ? "w-64" : "w-16"),
         )}
       >
-        {/* Logo / Brand — klik logo saat sidebar tertutup untuk membuka */}
-        <div
-          className={cn(
-            "flex items-center gap-2 px-3 py-4 shrink-0",
-            !expanded && "cursor-pointer",
-          )}
-          onClick={!expanded ? closeOrToggle : undefined}
-          title={!expanded ? "Buka sidebar" : undefined}
-        >
-          <div
-            className={cn(
-              "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 select-none transition-colors",
-              !expanded && "group hover:bg-white/20",
-            )}
-          >
-            <Image
-              src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/img/logo.png`}
-              alt="MealChain Guardian logo"
-              width={28}
-              height={28}
-              className={cn("object-contain", !expanded && "group-hover:hidden")}
-              priority
-            />
-            {!expanded && (
+        {/* Logo / Brand — di rail yang tertutup, logo itu sendiri adalah tombol pembuka. */}
+        <div className="flex items-center gap-2 px-3 py-4 shrink-0">
+          {expanded ? (
+            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white select-none">
+              {/* Dekoratif: nama brand tertulis tepat di sebelahnya */}
+              <Image
+                src={LOGO_MARK}
+                alt=""
+                aria-hidden="true"
+                width={24}
+                height={24}
+                className="object-contain"
+                priority
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={closeOrToggle}
+              aria-label="Buka sidebar"
+              aria-expanded={false}
+              title="Buka sidebar"
+              className="group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              {/* Dekoratif: nama aksesibelnya dipegang tombol ini */}
+              <Image
+                src={LOGO_MARK}
+                alt=""
+                aria-hidden="true"
+                width={24}
+                height={24}
+                className="object-contain group-hover:hidden"
+                priority
+              />
               <ChevronRight
-                className="h-4 w-4 hidden group-hover:block text-white"
+                className="h-4 w-4 hidden group-hover:block text-brand"
                 aria-hidden="true"
               />
-            )}
-          </div>
+            </button>
+          )}
 
           {expanded && (
             <span className="text-sm font-semibold text-white whitespace-nowrap overflow-hidden">
@@ -149,12 +167,14 @@ export function Sidebar() {
 
           {expanded && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 closeOrToggle();
               }}
+              aria-label={isMobile ? "Tutup menu" : "Tutup sidebar"}
               title={isMobile ? "Tutup menu" : "Tutup sidebar"}
-              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+              className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:h-6 sm:w-6"
             >
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -209,9 +229,11 @@ export function Sidebar() {
                   </span>
                 </div>
                 <button
+                  type="button"
                   onClick={logout}
+                  aria-label="Keluar"
                   title="Keluar"
-                  className="shrink-0 flex h-7 w-7 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:h-7 sm:w-7"
                 >
                   <LogOut className="h-4 w-4" aria-hidden="true" />
                 </button>

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
@@ -102,8 +102,25 @@ export default function LoginPage() {
           className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-navy-900/50 to-navy-900/35"
         />
         <div className="relative z-10">
-          <h2 className="flex items-center gap-2.5 text-2xl font-semibold leading-tight lg:text-3xl">
-            <ShieldCheck className="h-6 w-6 shrink-0" aria-hidden />
+          <h2 className="flex items-center gap-3 text-2xl font-semibold leading-tight lg:text-3xl">
+            {/*
+              Mark brand asli di atas tile putih, bukan ikon lucide `ShieldCheck` seperti
+              sebelumnya: aset resmi dipakai apa adanya, dan tile putih menyamakan
+              perlakuan dengan rail sidebar + favicon/ikon PWA. Di atas foto berselubung
+              navy, kontras warna mark hanya 1,1–2,6:1 — di atas putih 3,8–11,2:1 (terukur).
+              Dekoratif: nama brand tertulis di sebelahnya.
+            */}
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
+              <Image
+                src={`${BASE_PATH}/img/logo-mark.png`}
+                alt=""
+                aria-hidden="true"
+                width={28}
+                height={28}
+                className="object-contain"
+                priority
+              />
+            </span>
             MealChain Guardian
           </h2>
         </div>

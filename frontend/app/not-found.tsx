@@ -1,8 +1,21 @@
+import Image from "next/image";
 import Link from "next/link";
+
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
+      {/* Mark brand: halaman ini juga punya brand, dan sebelumnya hanya teks. Dekoratif
+          karena judul di bawahnya sudah menyebut MealChain Guardian. */}
+      <Image
+        src={`${BASE_PATH}/img/logo-mark.png`}
+        alt=""
+        aria-hidden="true"
+        width={56}
+        height={56}
+        className="object-contain"
+      />
       <h1 className="text-xl font-semibold text-navy-900">
         Halaman tidak ditemukan
       </h1>
