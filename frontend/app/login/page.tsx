@@ -8,6 +8,7 @@ import { z } from "zod";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
+import { DEMO_ACCOUNTS } from "@/lib/demo-accounts";
 import { cn } from "@/lib/utils";
 
 const loginSchema = z.object({
@@ -30,34 +31,9 @@ const AGENT_CHAIN = [
 ];
 
 /**
- * Akun demo (mock, bukan kredensial nyata — lihat `lib/mock-data.ts`).
- * Tombolnya masuk lewat jalur login yang sama, cuma tanpa mengetik: saat demo ke
- * juri, mengetik password panjang itu risiko yang tidak perlu.
+ * Akun demo: satu klik, tanpa mengetik — penting saat demo ke juri. Daftarnya tinggal di
+ * `lib/demo-accounts.ts` supaya email di UI, mock, dan seed backend tidak bisa menyimpang.
  */
-const DEMO_ACCOUNTS = [
-  {
-    role: "Kepala SPPG",
-    username: "sppg.head@demo.local",
-    password: "Demo#SPPG2026",
-    detail: "DKI Jakarta · bisa approve",
-    recommended: true,
-  },
-  {
-    role: "Ahli Gizi SPPG",
-    username: "sppg.nutritionist@demo.local",
-    password: "Demo#Nut2026",
-    detail: "Jawa Barat (Bogor) · bisa approve",
-    recommended: false,
-  },
-  {
-    role: "Monitor BGN",
-    username: "bgn.monitor@demo.local",
-    password: "Demo#BGN2026",
-    detail: "Semua wilayah · read-only",
-    recommended: false,
-  },
-];
-
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
@@ -241,7 +217,7 @@ export default function LoginPage() {
                 >
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-navy-900">
-                      {account.role}
+                      {account.label}
                       {account.recommended && (
                         <span className="ml-2 text-xs font-normal text-brand">
                           disarankan
@@ -260,9 +236,13 @@ export default function LoginPage() {
               ))}
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Password demo: <span className="font-mono">Demo#SPPG2026</span> ·{" "}
-              <span className="font-mono">Demo#Nut2026</span> ·{" "}
-              <span className="font-mono">Demo#BGN2026</span>
+              Password demo:{" "}
+              {DEMO_ACCOUNTS.map((account, index) => (
+                <span key={account.username}>
+                  {index > 0 && " · "}
+                  <span className="font-mono">{account.password}</span>
+                </span>
+              ))}
             </p>
           </div>
         </div>

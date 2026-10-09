@@ -50,3 +50,21 @@ def secret_key() -> str:
 def using_dev_secret() -> bool:
     """True kalau kunci tanda tangan masih nilai pengembangan (dipakai untuk peringatan di /health)."""
     return secret_key() == DEV_SECRET_KEY
+
+
+# Origin yang boleh memanggil API ini dari peramban. Default = dev lokal: `next dev` di :3000.
+# Tanpa ini, fetch dari UI ke :8000 diblokir CORS di peramban (server tetap 200, browser yang
+# menolak) — dan gejalanya membingungkan karena `curl` tetap berhasil.
+DEV_CORS_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
+
+
+def cors_origins() -> list[str]:
+    """Daftar origin yang diizinkan, dari env `APP_CORS_ORIGINS` (dipisah koma).
+
+    Tambahkan origin lain saat perlu (mis. situs demo GitHub Pages atau IP VPS). Jangan pakai
+    `*`: API ini memakai header Authorization, dan `*` tidak boleh dipasangkan dengan credential.
+    """
+    raw = os.environ.get("APP_CORS_ORIGINS", "").strip()
+    if not raw:
+        return list(DEV_CORS_ORIGINS)
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]

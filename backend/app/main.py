@@ -8,14 +8,27 @@ usul -> approve -> execute dengan aturan approval di server (P2.2c). Belum ada: 
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import actions, auth, decisions, supply
+from app.config import cors_origins
 from app.sap_integration.factory import get_sap_provider
 from app.sap_integration.mapping import UnmappedSapValueError
 from app.sap_integration.provider_interface import SAPProviderError
 
 app = FastAPI(title="MealChain Guardian — backend", version="0.1.0")
+
+# UI di peramban (`next dev` di :3000) memanggil API ini lintas origin. Tanpa CORS, permintaan
+# diblokir peramban walau server menjawab 200 — `curl` tidak menunjukkan masalah, jadi jangan
+# simpulkan "backend baik-baik saja" dari curl saja. Origin diatur lewat `APP_CORS_ORIGINS`.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(supply.router)
 app.include_router(auth.router)

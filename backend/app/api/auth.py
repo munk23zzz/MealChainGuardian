@@ -28,7 +28,7 @@ class LoginRequest(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "example": {"username": "kepala.jakarta@demo.local", "password": "<password demo>"}
+            "example": {"username": "sppg.head@demo.local", "password": "<password demo>"}
         }
     }
 

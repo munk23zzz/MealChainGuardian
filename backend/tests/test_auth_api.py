@@ -15,10 +15,24 @@ from sqlalchemy import delete
 from api_support import JAKARTA_HEAD, MONITOR, user_headers
 from app.config import secret_key
 from app.core.auth import create_token, decode_unverified_payload
-from app.db_seed import DEMO_PASSWORD_BY_ROLE, DEMO_USERS
+from app.db_seed import DEMO_PASSWORD_BY_ROLE, DEMO_USERS, UI_DEMO_EMAILS
 from app.models import User
 
 WRONG_PASSWORD_MESSAGE = "Email atau password salah."
+
+# Email yang TERTULIS di halaman login (docs/design.md §1.5). Kalau seed berubah tanpa UI (atau
+# sebaliknya), tombol quick-login gagal diam-diam hanya saat NEXT_PUBLIC_USE_MOCK=false — jadi
+# pasangannya dikunci di sini.
+DOCUMENTED_UI_EMAILS = {
+    "sppg.head@demo.local",
+    "sppg.nutritionist@demo.local",
+    "bgn.monitor@demo.local",
+}
+
+
+def test_ui_demo_accounts_exist_in_the_seed_with_the_documented_emails():
+    assert set(UI_DEMO_EMAILS) == DOCUMENTED_UI_EMAILS
+    assert DOCUMENTED_UI_EMAILS <= {spec["email"] for spec in DEMO_USERS}
 
 
 def test_login_turns_email_and_password_into_a_token(client):

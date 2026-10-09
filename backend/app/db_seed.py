@@ -95,23 +95,45 @@ BATCH_ATTRIBUTES = {
     },
 }
 
-# Akun demo (docs/Skill.md §9). Hash di bawah PLACEHOLDER — bukan kredensial, dan login belum ada.
+# Akun demo (docs/Skill.md §9: 6 akun — head + nutritionist Jakarta & Cianjur, 2 monitor BGN).
+#
+# Email TIGA akun pertama SENGAJA sama dengan yang tertulis di halaman login demo
+# (`frontend/lib/demo-accounts.ts`, docs/design.md §1.5). Sebelumnya seed ini memakai
+# `kepala.jakarta@demo.local` dkk, sehingga tombol quick-login di UI GAGAL begitu
+# `NEXT_PUBLIC_USE_MOCK=false` — email itu tidak ada di database. Dokumen yang menang
+# (tampilan mengikuti design.md), jadi seed ini yang menyesuaikan, bukan UI-nya.
 #
 # CATATAN (perlu keputusan Roy): §9 menyebut akun demo untuk Jakarta dan Bogor. Jakarta ada di sini;
 # Bogor BELUM, karena Bogor tidak ada di dataset §11 (Cianjur surplus, Jakarta kekurangan) sehingga
 # lokasinya belum ada dan stok/demand-nya akan kosong — lebih baik akunnya menyusul bersama datanya
 # daripada membuat lokasi tanpa isi. Cianjur ditambahkan (additive) karena ia SPPG asal di dataset.
+UI_DEMO_EMAILS = (
+    "sppg.head@demo.local",
+    "sppg.nutritionist@demo.local",
+    "bgn.monitor@demo.local",
+)
+
+# Email akun demo yang PERNAH dipakai dan sekarang diganti. Dipakai `seed_demo_data` untuk
+# memindahkan baris akun yang sudah ada (lihat komentar di sana) — bukan sekadar catatan sejarah,
+# jadi entri boleh dihapus setelah semua database (termasuk VPS nanti) pernah di-seed ulang.
+RENAMED_DEMO_EMAILS = {
+    "kepala.jakarta@demo.local": "sppg.head@demo.local",
+    "gizi.jakarta@demo.local": "sppg.nutritionist@demo.local",
+    "monitor1@demo.local": "bgn.monitor@demo.local",
+    "monitor2@demo.local": "bgn.monitor2@demo.local",
+}
+
 DEMO_USERS = (
-    {"name": "Kepala SPPG Jakarta", "email": "kepala.jakarta@demo.local", "role": "sppg_head",
+    {"name": "Kepala SPPG Jakarta", "email": "sppg.head@demo.local", "role": "sppg_head",
      "location": "Jakarta"},
-    {"name": "Ahli Gizi Jakarta", "email": "gizi.jakarta@demo.local", "role": "sppg_nutritionist",
-     "location": "Jakarta"},
+    {"name": "Ahli Gizi Jakarta", "email": "sppg.nutritionist@demo.local",
+     "role": "sppg_nutritionist", "location": "Jakarta"},
     {"name": "Kepala SPPG Cianjur", "email": "kepala.cianjur@demo.local", "role": "sppg_head",
      "location": "Cianjur"},
     {"name": "Ahli Gizi Cianjur", "email": "gizi.cianjur@demo.local", "role": "sppg_nutritionist",
      "location": "Cianjur"},
-    {"name": "Monitor BGN 1", "email": "monitor1@demo.local", "role": "bgn_monitor", "location": None},
-    {"name": "Monitor BGN 2", "email": "monitor2@demo.local", "role": "bgn_monitor", "location": None},
+    {"name": "Monitor BGN 1", "email": "bgn.monitor@demo.local", "role": "bgn_monitor", "location": None},
+    {"name": "Monitor BGN 2", "email": "bgn.monitor2@demo.local", "role": "bgn_monitor", "location": None},
 )
 
 # Password demo per peran. Ini BUKAN kredensial rahasia: nilainya memang ditampilkan di halaman login
@@ -159,6 +181,21 @@ def seed_demo_data(session: Session) -> dict[str, int]:
                     reliability_score=spec["reliability_score"],
                 )
             )
+
+    # Email akun demo yang pernah berubah: barisnya di-UPDATE, bukan dihapus, dan WAJIB dijalankan
+    # SEBELUM loop di bawah (kalau sesudah, akun baru sudah dibuat sehingga baris lama tertinggal).
+    #
+    # Kenapa UPDATE: `approvals.approved_by` (dan riwayat lain) menunjuk `users.id`, jadi menghapus
+    # akun demo lama melanggar FK — dan kalau dipaksa, membuang riwayat approval. Identitas akun demo
+    # = peran + lokasi; email hanya label. Idempotent: setelah sekali jalan, `old_email` tidak ada lagi.
+    for old_email, new_email in RENAMED_DEMO_EMAILS.items():
+        stale = session.scalar(select(User).where(User.email == old_email))
+        if stale is None:
+            continue
+        if session.scalar(select(User).where(User.email == new_email)) is None:
+            stale.email = new_email
+            session.flush()
+        # Kalau email baru sudah ada, baris lama dibiarkan apa adanya (masih mungkin dirujuk riwayat).
 
     for spec in DEMO_USERS:
         existing = session.scalar(select(User).where(User.email == spec["email"]))

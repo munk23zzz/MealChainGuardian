@@ -10,11 +10,25 @@ from typing import Any
 
 from app.db_seed import DEMO_PASSWORD_BY_ROLE, DEMO_USERS
 
-JAKARTA_HEAD = "kepala.jakarta@demo.local"
-JAKARTA_NUTRI = "gizi.jakarta@demo.local"
-CIANJUR_HEAD = "kepala.cianjur@demo.local"
-CIANJUR_NUTRI = "gizi.cianjur@demo.local"
-MONITOR = "monitor1@demo.local"
+
+def _demo_email(role: str, location: str | None) -> str:
+    """Email akun demo dari seed — test TIDAK boleh menulis email harfiah.
+
+    Sebelumnya konstanta di sini menyalin email seed, sehingga ketika emailnya disamakan dengan
+    halaman login UI (`sppg.head@demo.local` dkk) test ikut merah hanya karena salinan yang basi.
+    Sumbernya satu: `app/db_seed.py`.
+    """
+    for spec in DEMO_USERS:
+        if spec["role"] == role and spec["location"] == location:
+            return str(spec["email"])
+    raise AssertionError(f"akun demo {role}/{location} tidak ada di DEMO_USERS")
+
+
+JAKARTA_HEAD = _demo_email("sppg_head", "Jakarta")
+JAKARTA_NUTRI = _demo_email("sppg_nutritionist", "Jakarta")
+CIANJUR_HEAD = _demo_email("sppg_head", "Cianjur")
+CIANJUR_NUTRI = _demo_email("sppg_nutritionist", "Cianjur")
+MONITOR = _demo_email("bgn_monitor", None)
 
 # Satu sumber kebenaran password demo: peta peran di app/db_seed.py.
 DEMO_PASSWORD_BY_EMAIL = {
