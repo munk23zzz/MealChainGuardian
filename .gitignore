@@ -2,3 +2,14 @@
 .env
 .env.local
 docker-compose.override.yml
+
+# Dokumen proyek tinggal di luar repo (kanonik: E:\hackathon\mealchain-guardian).
+# Disalin lokal untuk dibaca agen/kode; JANGAN di-push ke GitHub.
+/docs/
+/AGENTS.md
+/IDEA.md
+/Roadmap.md
+/Rules.md
+/TODO.md
+/workflows.md
+/PERMINTAAN-BERKAS.md
