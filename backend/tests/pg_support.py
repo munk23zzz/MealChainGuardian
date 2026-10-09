@@ -11,6 +11,7 @@ import os
 from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine, delete, text, update
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,7 +31,7 @@ from app.sap_integration.mock_provider import MockSAPProvider
 from app.sap_integration.sql_mock_store import SqlSapMockStore
 
 DEFAULT_TEST_DATABASE_URL = (
-    "postgresql+psycopg://mealchain:mealchain@localhost:55432/mealchain_test"
+    "postgresql+psycopg://mealchain:mealchain@localhost:55432/mealchain_test?connect_timeout=2"
 )
 # Database bawaan container, dipakai hanya untuk membuat database test.
 ADMIN_DATABASE = "mealchain"
@@ -44,11 +45,19 @@ def test_database_url() -> str:
     return os.environ.get("TEST_DATABASE_URL", "").strip() or DEFAULT_TEST_DATABASE_URL
 
 
+def _admin_url(url: str) -> str:
+    """URL ke database bawaan container, untuk membuat database test.
+
+    Query string WAJIB ikut terbawa: dialah yang membawa `connect_timeout`. Kalau hilang, koneksi
+    ke Postgres yang tidak jalan TIDAK gagal cepat — ia menggantung sekitar dua menit sampai
+    timeout TCP sistem, dan seluruh suite jadi lambat sekali di mesin tanpa Docker.
+    """
+    return make_url(url).set(database=ADMIN_DATABASE).render_as_string(hide_password=False)
+
+
 def _ensure_database(url: str) -> None:
-    name = url.rpartition("/")[2]
-    admin = create_engine(
-        url.replace(f"/{name}", f"/{ADMIN_DATABASE}"), isolation_level="AUTOCOMMIT", future=True
-    )
+    name = make_url(url).database
+    admin = create_engine(_admin_url(url), isolation_level="AUTOCOMMIT", future=True)
     try:
         with admin.connect() as connection:
             exists = connection.execute(
