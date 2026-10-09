@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+import Image from "next/image";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
 import { DEMO_ACCOUNTS } from "@/lib/demo-accounts";
@@ -17,6 +18,11 @@ const loginSchema = z.object({
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
+
+// GitHub Pages menyajikan aplikasi di sub-path (/MealChainGuardian). Untuk aset di `public/`
+// prefix ini harus ditulis sendiri: `next/image` TIDAK menambahkannya saat ekspor statis
+// (dibuktikan dengan memeriksa `src=` di out/login/index.html, bukan diasumsikan).
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /**
  * Akun demo: satu klik, tanpa mengetik — penting saat demo ke juri. Daftarnya tinggal di
@@ -68,9 +74,34 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
-      {/* Panel produk: konteks dulu, form kemudian. */}
-      <aside className="relative flex flex-col justify-between gap-8 overflow-hidden bg-brand px-8 py-10 text-white lg:w-[46%] lg:px-12 lg:py-14">
-        <div>
+      {/*
+        Panel produk: konteks dulu, form kemudian.
+        Latar: ilustrasi SPPG (public/img/login-sppg.jpg, 164 KB hasil kompres dari 2,4 MB).
+        `bg-brand` tetap dipasang sebagai alas supaya panel tidak pernah putih kalau gambar
+        gagal dimuat. Framing potongan sengaja `objectPosition: "15% 50%"`: pada rasio panel
+        desktop (~0,5) gedung SPPG dan papan namanya masuk utuh, tidak terpotong di tepi
+        (kandidat crop sudah dibandingkan secara visual sebelum dipilih).
+      */}
+      <aside className="relative flex min-h-[260px] flex-col justify-end gap-8 overflow-hidden bg-brand px-8 py-10 text-white lg:min-h-screen lg:w-[46%] lg:justify-start lg:px-12 lg:py-14">
+        <Image
+          src={`${BASE_PATH}/img/login-sppg.jpg`}
+          alt=""
+          aria-hidden="true"
+          fill
+          priority
+          sizes="(min-width: 1024px) 46vw, 100vw"
+          className="object-cover"
+          style={{ objectPosition: "15% 50%" }}
+        />
+        {/* Selubung navy: (1) menyatukan palet biru ilustrasi dengan navy #1F3B4D proyek,
+            (2) menjaga kontras teks putih di atasnya. Bagian atas sengaja lebih tipis supaya
+            ilustrasinya tetap terlihat; bagian bawah lebih pekat karena judul di layar kecil
+            duduk di bawah (kontras terukur: lihat catatan di commit). */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-navy-900/50 to-navy-900/35"
+        />
+        <div className="relative z-10">
           <h2 className="flex items-center gap-2.5 text-2xl font-semibold leading-tight lg:text-3xl">
             <ShieldCheck className="h-6 w-6 shrink-0" aria-hidden />
             MealChain Guardian
