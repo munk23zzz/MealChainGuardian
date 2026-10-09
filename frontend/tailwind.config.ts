@@ -13,20 +13,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Palet dari Afghan Product Dashboard
+        // Token design.md §4 (hybrid): navy untuk teks/heading, biru untuk aksi.
+        navy: {
+          900: "#1F3B4D", // teks utama & heading
+          700: "#2E5266", // aksen sekunder
+          100: "#DCE6E9", // border & permukaan netral
+        },
+        grey: {
+          500: "#555555", // teks sekunder, caption
+        },
         brand: {
-          sidebar: "#0969DA", // sidebar & header background
-          active:  "#0550AE", // item sidebar aktif
-          green:   "#10B981", // approve/success
-          orange:  "#F97316", // warning/action
-          purple:  "#A855F7", // accent
-          red:     "#EF4444", // danger
-          bg:      "#F5F6FA", // background luar konten
+          DEFAULT: "#0969DA", // header, sidebar, tombol primer, link
+          active:  "#0550AE", // keadaan aktif/hover
+          surface: "#F5F6FA", // latar halaman
         },
         status: {
-          safe:    "#10B981", // hijau
-          warning: "#F97316", // orange
-          danger:  "#EF4444", // merah
+          safe:    "#2E7D32", // PASS / normal
+          warning: "#F9A825", // tight / needs verification
+          danger:  "#C62828", // FAIL / shortage kritis
         },
         // Token shadcn/ui — nilainya dari globals.css via CSS variable
         border:     "hsl(var(--border))",

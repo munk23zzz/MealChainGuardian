@@ -3,7 +3,19 @@
  * butuh login dan ke mana redirect berdasarkan status auth.
  */
 
-const PROTECTED_PREFIXES = ["/dashboard", "/decisions", "/agent-log", "/kpi"];
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/today",
+  "/decisions",
+  "/agent-log",
+  "/kpi",
+  "/receiving",
+  "/suppliers",
+  "/compliance",
+  "/surplus",
+  "/quality",
+  "/sources",
+];
 
 /**
  * Status auth. `loading` = token sedang dibaca dari localStorage (setelah mount),

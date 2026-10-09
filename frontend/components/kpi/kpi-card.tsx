@@ -29,24 +29,44 @@ export function KPICard({
       : `${trend.deltaAbs > 0 ? "+" : "−"}${Math.abs(trend.deltaPercent)}% vs periode sebelumnya`;
 
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-1">
-        <p className="font-medium text-muted-foreground">{definition.label}</p>
+    <Card className="animate-fade-up h-full">
+      <CardContent className="flex h-full flex-col gap-1">
+        <p className="text-sm font-medium text-muted-foreground">
+          {definition.label}
+        </p>
         <p className="text-2xl font-semibold tabular-nums text-navy-900">
           {formatKpiValue(definition.key, value)}
         </p>
-        <p
-          className={cn(
-            "flex items-center gap-1 text-xs",
-            improvement === true && "text-status-safe",
-            improvement === false && "text-status-danger",
-            improvement === null && "text-muted-foreground",
+        <p className="flex items-center gap-1.5 text-xs text-navy-900">
+          {improvement !== null && (
+            <span
+              aria-hidden
+              className={cn(
+                "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+                improvement ? "bg-status-safe" : "bg-status-danger",
+              )}
+            />
           )}
-        >
-          <Icon className="h-3.5 w-3.5" />
-          {deltaLabel}
+          <Icon
+            aria-hidden
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              improvement === true && "text-status-safe",
+              improvement === false && "text-status-danger",
+              improvement === null && "text-muted-foreground",
+            )}
+          />
+          <span className={cn(improvement === null && "text-muted-foreground")}>
+            {deltaLabel}
+          </span>
         </p>
-        <p className="mt-1 text-muted-foreground">{definition.description}</p>
+        {/* `mt-auto` bikin keterangan selalu rata bawah walau tinggi kartu beda — grid jadi rapi. */}
+        <p className="mt-auto pt-2 text-xs text-muted-foreground">
+          {definition.description}{" "}
+          <span className="whitespace-nowrap">
+            ({definition.higherIsBetter ? "makin tinggi makin baik" : "makin rendah makin baik"})
+          </span>
+        </p>
       </CardContent>
     </Card>
   );

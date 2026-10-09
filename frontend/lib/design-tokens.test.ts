@@ -29,7 +29,20 @@ describe("PALETTE (design.md §4)", () => {
       statusSafe: "#2E7D32",
       statusWarning: "#F9A825",
       statusDanger: "#C62828",
+      // Aksen biru brand (hybrid, disetujui Roy; tercatat di design.md §4).
+      brandBlue: "#0969DA",
+      brandBlueActive: "#0550AE",
+      surface: "#F5F6FA",
+      // Netral grafik (sumbu/grid Recharts) — nama untuk warna yang sudah dipakai
+      // grafik sejak awal; tercatat di design.md §4.
+      plotGrid: "#B0BEC5",
     });
+  });
+
+  it("navy dipakai untuk teks/heading, biru brand hanya untuk aksi & chrome", () => {
+    expect(PALETTE.navy900).toBe("#1F3B4D");
+    expect(PALETTE.brandBlue).toBe("#0969DA");
+    expect(PALETTE.navy900).not.toBe(PALETTE.brandBlue);
   });
 });
 
@@ -114,10 +127,21 @@ describe("decisionStatus", () => {
   it("semua status dari Schema.md §3 punya label Bahasa Indonesia", () => {
     expect(decisionStatusLabel("proposed")).toBe("Diusulkan");
     expect(decisionStatusLabel("verifier_flagged")).toBe("Ditandai Verifier");
+    expect(decisionStatusLabel("verifier_unavailable")).toBe(
+      "Verifier tidak tersedia",
+    );
     expect(decisionStatusLabel("pending_approval")).toBe("Menunggu approval");
     expect(decisionStatusLabel("approved")).toBe("Disetujui");
     expect(decisionStatusLabel("rejected")).toBe("Ditolak");
     expect(decisionStatusLabel("executed")).toBe("Dieksekusi");
+    expect(decisionStatusLabel("expired")).toBe("Kedaluwarsa");
+  });
+
+  it("kedaluwarsa tampil netral (riwayat), bukan merah alarm", () => {
+    expect(decisionStatusColor("expired")).toBe(PALETTE.grey500);
+    expect(decisionStatusColor("verifier_unavailable")).toBe(
+      PALETTE.statusWarning,
+    );
   });
 });
 

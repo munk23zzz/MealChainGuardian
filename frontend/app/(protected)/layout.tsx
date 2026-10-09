@@ -8,6 +8,9 @@ import { Sidebar } from "@/components/sidebar/sidebar";
 import { TopBar } from "@/components/layout/topbar";
 import { SidebarProvider } from "@/contexts/sidebar";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { OfflineBanner } from "@/components/ui/offline-banner";
+import { CommandPalette } from "@/components/layout/command-palette";
+import { DemoLayer } from "@/components/demo/demo-layer";
 
 /**
  * Layout halaman terlindungi.
@@ -49,10 +52,22 @@ export default function ProtectedLayout({
       <div className="flex min-h-screen">
         <Sidebar />
         <div className="flex flex-1 flex-col min-w-0">
+          <a
+            href="#konten"
+            className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[80] focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:text-navy-900 focus:shadow"
+          >
+            Lompat ke konten utama
+          </a>
           <TopBar />
-          <main className="flex-1 p-6">{children}</main>
+          <OfflineBanner />
+          {/* pb ekstra: memberi ruang untuk bilah mode demo dan tombol aksi lapangan. */}
+          <main id="konten" className="flex-1 p-4 pb-28 sm:p-6 sm:pb-24">
+            {children}
+          </main>
         </div>
       </div>
+      <CommandPalette />
+      <DemoLayer />
     </SidebarProvider>
   );
 }

@@ -8,6 +8,8 @@ import {
   getDemand,
   getKpi,
   getLocations,
+  getSupplierHistory,
+  getSuppliers,
   getSupply,
 } from "@/lib/api";
 
@@ -67,5 +69,23 @@ export function useKpi() {
     queryKey: ["kpi"],
     queryFn: getKpi,
     refetchInterval: POLL_INTERVAL,
+  });
+}
+
+/** Daftar pemasok + skor kepercayaan terkini (design.md §3.9c). */
+export function useSuppliers() {
+  return useQuery({
+    queryKey: ["suppliers"],
+    queryFn: getSuppliers,
+    refetchInterval: POLL_INTERVAL,
+  });
+}
+
+/** Riwayat penerimaan satu pemasok — dasar grafik "sebelum/sesudah insiden". */
+export function useSupplierHistory(supplierId: string) {
+  return useQuery({
+    queryKey: ["supplier-history", supplierId],
+    queryFn: () => getSupplierHistory(supplierId),
+    enabled: Boolean(supplierId),
   });
 }

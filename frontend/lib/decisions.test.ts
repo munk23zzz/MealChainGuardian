@@ -3,8 +3,9 @@ import {
   filterRecommendations,
   sortRecommendationsNewestFirst,
   getWinningCandidate,
+  targetRegion,
 } from "./decisions";
-import type { Recommendation } from "./api/schema";
+import type { Location, Recommendation } from "./api/schema";
 
 const base: Recommendation = {
   id: "d1",
@@ -84,5 +85,37 @@ describe("getWinningCandidate", () => {
 
   it("null jika breakdown kosong", () => {
     expect(getWinningCandidate({ ...base, safeDeliveredCostBreakdown: [] })).toBeNull();
+  });
+});
+
+const locations: Location[] = [
+  {
+    id: "jakarta",
+    name: "SPPG Jakarta Utara",
+    region: "DKI Jakarta",
+    latitude: -6.1218,
+    longitude: 106.9,
+    roleHint: "demand_hub",
+    status: "warning",
+  },
+];
+
+describe("targetRegion", () => {
+  it("mengembalikan region lokasi tujuan (dasar cek scope approval)", () => {
+    expect(targetRegion(base, locations)).toBe("DKI Jakarta");
+  });
+
+  it("undefined bila lokasi tujuan tidak ada — izin approve gagal-tertutup", () => {
+    expect(
+      targetRegion({ ...base, targetLocationId: "tidak-ada" }, locations),
+    ).toBeUndefined();
+  });
+
+  it("tidak memakai region lokasi sumber sebagai tebakan", () => {
+    const sumberJakarta = locations[0];
+    expect(sumberJakarta.region).toBe("DKI Jakarta");
+    expect(
+      targetRegion({ ...base, targetLocationId: "tidak-ada" }, locations),
+    ).not.toBe(sumberJakarta.region);
   });
 });

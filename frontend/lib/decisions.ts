@@ -4,6 +4,7 @@
 import type {
   CandidateCostBreakdown,
   DecisionStatus,
+  Location,
   Recommendation,
 } from "./api/schema";
 
@@ -34,4 +35,22 @@ export function getWinningCandidate(
   return candidates.reduce((best, c) =>
     c.totalSafeDeliveredCostPerKg < best.totalSafeDeliveredCostPerKg ? c : best,
   );
+}
+
+/**
+ * Region lokasi tujuan sebuah keputusan.
+ *
+ * Dipakai untuk cek scope approval: sppg_head/sppg_nutritionist hanya boleh
+ * approve di region-nya (lib/auth.ts `canApproveForLocation`). Diekstrak ke sini
+ * supaya halaman punya satu tempat pengambilan region yang bisa diuji — bug
+ * "tombol Approve tidak pernah muncul" berasal dari region yang tidak dioper.
+ *
+ * Lokasi yang tidak ditemukan mengembalikan `undefined` (bukan region tebakan):
+ * tanpa region, izin approve harus gagal-tertutup, bukan terbuka.
+ */
+export function targetRegion(
+  recommendation: Recommendation,
+  locations: Location[],
+): string | undefined {
+  return locations.find((l) => l.id === recommendation.targetLocationId)?.region;
 }

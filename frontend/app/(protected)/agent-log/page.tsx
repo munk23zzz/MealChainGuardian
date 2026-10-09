@@ -3,8 +3,10 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ShieldCheck } from "lucide-react";
 import { AgentTraceViewer, STEP_LABELS } from "@/components/agent/agent-trace-viewer";
+import { RunSummaryStrip } from "@/components/agent/run-summary";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +14,20 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useDecisions, useLocations } from "@/hooks/use-data";
-import { flattenTraces, filterAgentLog, sortLogNewestFirst } from "@/lib/agent-log";
+import { useAuth } from "@/contexts/auth";
+import { scopeForRole } from "@/lib/role";
+import {
+  decisionTouchesScope,
+  partitionByScope,
+  scopeDescription,
+} from "@/lib/scope";
+import {
+  filterAgentLog,
+  flattenTraces,
+  groupLogByDecision,
+  sortLogNewestFirst,
+  summarizeRun,
+} from "@/lib/agent-log";
 import type { AgentLogEntry } from "@/lib/agent-log";
 import { locationLabel } from "@/lib/labels";
 import { formatDateTime, formatDurationMs } from "@/lib/format";
@@ -49,9 +64,27 @@ function AgentLogPageInner() {
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data]);
   const decisions = useMemo(() => data ?? [], [data]);
 
+  /**
+   * Cakupan peran (design.md §1.4): trace agent memuat rencana pengiriman antar
+   * wilayah, jadi run di luar cakupan tidak ditampilkan — termasuk dari dropdown
+   * filter, supaya tidak ada jalan pintas untuk melihatnya.
+   */
+  const { role, region, locationId } = useAuth();
+  const roleScope = useMemo(
+    () => scopeForRole(role, { region, locationId }),
+    [role, region, locationId],
+  );
+  const { inScope: scopedDecisions, outOfScope: outsideDecisions } = useMemo(
+    () =>
+      partitionByScope(decisions, (d) =>
+        decisionTouchesScope(d, roleScope, locations),
+      ),
+    [decisions, roleScope, locations],
+  );
+
   const entries: AgentLogEntry[] = useMemo(
-    () => sortLogNewestFirst(flattenTraces(decisions)),
-    [decisions],
+    () => sortLogNewestFirst(flattenTraces(scopedDecisions)),
+    [scopedDecisions],
   );
 
   const visible = useMemo(
@@ -71,7 +104,20 @@ function AgentLogPageInner() {
     return counts;
   }, [visible]);
 
-  const totalDuration = visible.reduce((sum, e) => sum + (e.durationMs ?? 0), 0);
+  /** Ringkasan seluruh run yang sedang terlihat (header yang terbaca sekilas). */
+  const summary = useMemo(() => summarizeRun(visible), [visible]);
+
+  /** Kelompok per keputusan + ringkasan masing-masing (tidak dihitung di render). */
+  const groups = useMemo(
+    () =>
+      groupLogByDecision(visible).map(([decisionId, steps]) => ({
+        decisionId,
+        steps,
+        run: summarizeRun(steps),
+      })),
+    [visible],
+  );
+
   const label = (id: string) => locationLabel(id, locations);
 
   return (
@@ -87,7 +133,14 @@ function AgentLogPageInner() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-muted-foreground">
+          <span className="inline-flex items-center gap-2 text-muted-foreground">
+            <span
+              aria-hidden
+              className={cn(
+                "inline-block h-2 w-2 rounded-full",
+                isFetching ? "bg-status-warning" : "bg-status-safe",
+              )}
+            />
             {isFetching ? "memperbarui…" : "terbaru"}{" "}
             {dataUpdatedAt ? formatDateTime(new Date(dataUpdatedAt).toISOString()) : ""}
           </span>
@@ -97,6 +150,16 @@ function AgentLogPageInner() {
           </Button>
         </div>
       </div>
+
+      {outsideDecisions.length > 0 && (
+        <p className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-navy-900">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+          <span>
+            {scopeDescription(roleScope, outsideDecisions.length)} — trace
+            keputusan di luar cakupan tidak ditampilkan.
+          </span>
+        </p>
+      )}
 
       {error && (
         <ErrorState
@@ -117,7 +180,7 @@ function AgentLogPageInner() {
               className="h-9 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="all">Semua keputusan</option>
-              {decisions.map((d) => (
+              {scopedDecisions.map((d) => (
                 <option key={d.id} value={d.id}>
                   #{d.id} · {label(d.sourceLocationId)} → {label(d.targetLocationId)}
                 </option>
@@ -132,10 +195,16 @@ function AgentLogPageInner() {
             className="h-9 w-full max-w-sm rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
 
-          <span className="text-muted-foreground">
-            {visible.length} step · total durasi terlaporkan{" "}
-            {formatDurationMs(totalDuration)}
-          </span>
+        </CardContent>
+      </Card>
+
+      {/* Ringkasan run — dibaca sekilas sebelum menyusuri timeline */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Ringkasan run</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RunSummaryStrip summary={summary} />
         </CardContent>
       </Card>
 
@@ -166,7 +235,7 @@ function AgentLogPageInner() {
         />
       ) : (
         <div className="flex flex-col gap-4">
-          {groupByDecision(visible).map(([decisionId, steps]) => (
+          {groups.map(({ decisionId, steps, run }) => (
             <Card key={decisionId}>
               <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
                 <CardTitle className="flex flex-wrap items-center gap-2">
@@ -189,12 +258,38 @@ function AgentLogPageInner() {
                 </CardTitle>
                 <Link
                   href={`/decisions/${decisionId}`}
-                  className="text-navy-700 hover:underline"
+                  className="text-brand hover:underline"
                 >
                   Lihat keputusan
                 </Link>
               </CardHeader>
               <CardContent className="pt-3">
+                <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span className="tabular-nums">{run.steps} step</span>
+                  <span aria-hidden>·</span>
+                  <span className="tabular-nums">
+                    {formatDurationMs(run.reportedMs)} terlaporkan
+                  </span>
+                  {run.slowest && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>
+                        tahap terlama {STEP_LABELS[run.slowest.step]}{" "}
+                        <span className="tabular-nums">
+                          {formatDurationMs(run.slowest.durationMs)}
+                        </span>
+                      </span>
+                    </>
+                  )}
+                  {run.fallbacks > 0 && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <Badge tone="warning">
+                        {run.fallbacks} step pakai provider cadangan
+                      </Badge>
+                    </>
+                  )}
+                </p>
                 <AgentTraceViewer
                   steps={steps.map((s) => ({
                     step: s.step,
@@ -205,6 +300,7 @@ function AgentLogPageInner() {
                     stepAt: s.stepAt,
                     timestamp: s.stepAt,
                   }))}
+                  maxDurationMs={run.slowest?.durationMs ?? 0}
                 />
               </CardContent>
             </Card>
@@ -213,15 +309,4 @@ function AgentLogPageInner() {
       )}
     </div>
   );
-}
-
-/** Kelompokkan entry log per keputusan, urut sesuai kemunculan (terbaru dulu). */
-function groupByDecision(entries: AgentLogEntry[]): [string, AgentLogEntry[]][] {
-  const groups = new Map<string, AgentLogEntry[]>();
-  for (const entry of entries) {
-    const list = groups.get(entry.decisionId);
-    if (list) list.push(entry);
-    else groups.set(entry.decisionId, [entry]);
-  }
-  return Array.from(groups.entries());
 }

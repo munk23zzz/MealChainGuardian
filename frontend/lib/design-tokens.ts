@@ -7,6 +7,11 @@
  * jangan ganti tanpa alasan kuat"). Kalau butuh warna di luar palet ini,
  * tambahkan dulu ke design.md — bukan langsung ke komponen.
  *
+ * Model warna (hybrid, diputuskan bersama Roy — tercatat di design.md §4):
+ * - `navy900/navy700/navy100/grey500` : teks, heading, border, permukaan netral.
+ * - `brandBlue/brandBlueActive`       : header, sidebar, tombol, link ("tema biru").
+ * - `statusSafe/Warning/Danger`       : status keamanan & lokasi (bukan dekorasi).
+ *
  * File ini murni (tanpa React/DOM) supaya bisa diuji dengan vitest.
  */
 import type {
@@ -16,15 +21,25 @@ import type {
   SupplyRecord,
 } from "./api/schema";
 
-/** Palet dari Afghan Product Dashboard. */
+/** Palet design.md §4 + aksen biru brand (hybrid). */
 export const PALETTE = {
-  navy900: "#1E293B", // teks utama
-  navy700: "#0969DA", // aksen utama (sidebar, tombol primer)
-  navy100: "#F5F6FA", // background card netral
-  grey500: "#64748B", // teks sekunder, caption
-  statusSafe: "#10B981", // PASS / normal (hijau)
-  statusWarning: "#F97316", // tight / needs verification (orange)
-  statusDanger: "#EF4444", // FAIL / shortage kritis (merah)
+  navy900: "#1F3B4D", // teks utama & heading
+  navy700: "#2E5266", // aksen sekunder (tautan non-aksi, badge informasi)
+  navy100: "#DCE6E9", // border & permukaan netral
+  grey500: "#555555", // teks sekunder, caption
+  statusSafe: "#2E7D32", // PASS / normal (hijau)
+  statusWarning: "#F9A825", // tight / needs verification (kuning)
+  statusDanger: "#C62828", // FAIL / shortage kritis (merah)
+  brandBlue: "#0969DA", // header, sidebar, tombol primer, link
+  brandBlueActive: "#0550AE", // keadaan aktif/hover elemen brand
+  surface: "#F5F6FA", // latar halaman
+  /**
+   * Garis grid & sumbu grafik (Recharts butuh nilai warna literal, bukan kelas
+   * Tailwind). Netral terang: cukup terlihat sebagai pemandu, tidak bersaing
+   * dengan data. Nilai ini sudah dipakai grafik sejak awal dan sekarang bernama
+   * supaya tidak ada hex yang ditulis di komponen.
+   */
+  plotGrid: "#B0BEC5",
 } as const;
 
 /** Nada visual yang dipakai StatusBadge dan elemen status lain. */
@@ -50,10 +65,10 @@ const TONE_COLORS: Record<Tone, string> = {
  * ambigu sekilas). Tidak ada warna baru — masih palet design.md.
  */
 const TONE_CLASSES: Record<Tone, string> = {
-  safe: "border-brand-green/40 bg-brand-green/10 text-brand-green",
-  warning: "border-brand-orange/50 bg-brand-orange/20 text-navy-900",
-  danger: "border-brand-red/40 bg-brand-red/10 text-brand-red",
-  info: "border-brand-sidebar/30 bg-brand-sidebar/10 text-brand-sidebar",
+  safe: "border-status-safe/40 bg-status-safe/10 text-status-safe",
+  warning: "border-status-warning/50 bg-status-warning/20 text-navy-900",
+  danger: "border-status-danger/40 bg-status-danger/10 text-status-danger",
+  info: "border-navy-700/30 bg-navy-700/10 text-navy-700",
   neutral: "border-grey-500/30 bg-grey-500/10 text-grey-500",
 };
 
@@ -64,6 +79,21 @@ export function toneColor(tone: Tone): string {
 export function toneClasses(tone: Tone): string {
   return TONE_CLASSES[tone];
 }
+
+/**
+ * Kelas Tailwind untuk elemen interaktif (tema biru). Dipakai agar tidak ada
+ * komponen yang menulis warna aksi sendiri-sendiri — sumbernya satu, di sini.
+ */
+export const INTERACTIVE_CLASSES = {
+  /** Tautan teks (mis. "Lihat semua", "← Kembali ke feed"). */
+  link: "text-brand hover:underline",
+  /** Tombol/aksi utama. */
+  primary: "bg-brand text-white hover:bg-brand-active",
+  /** Permukaan header & sidebar. */
+  chrome: "bg-brand text-white",
+  /** Item navigasi yang sedang aktif. */
+  chromeActive: "bg-brand-active text-white",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Status lokasi (design.md §3.1): hijau normal, kuning tight, merah kritis
@@ -134,19 +164,26 @@ export function safetyStatusTone(status: SafetyStatus): Tone {
 const DECISION_TONES: Record<DecisionStatusKey, Tone> = {
   proposed: "neutral",
   verifier_flagged: "danger",
+  // Perlu 2 approval (Skill.md §9) tapi bukan kegagalan data seperti flagged.
+  verifier_unavailable: "warning",
   pending_approval: "warning",
   approved: "safe",
   rejected: "danger",
   executed: "info",
+  // Lewat `expires_at`: tidak bisa dieksekusi lagi (Schema.md §6). Abu-abu
+  // karena ini keadaan riwayat, bukan alarm — merah dicadangkan untuk FAIL/flag.
+  expired: "neutral",
 };
 
 const DECISION_LABELS: Record<DecisionStatusKey, string> = {
   proposed: "Diusulkan",
   verifier_flagged: "Ditandai Verifier",
+  verifier_unavailable: "Verifier tidak tersedia",
   pending_approval: "Menunggu approval",
   approved: "Disetujui",
   rejected: "Ditolak",
   executed: "Dieksekusi",
+  expired: "Kedaluwarsa",
 };
 
 export function decisionStatusColor(status: DecisionStatusKey): string {
@@ -164,10 +201,12 @@ export function decisionStatusTone(status: DecisionStatusKey): Tone {
 const DECISION_STATUS_VALUES: DecisionStatusKey[] = [
   "proposed",
   "verifier_flagged",
+  "verifier_unavailable",
   "pending_approval",
   "approved",
   "rejected",
   "executed",
+  "expired",
 ];
 
 /**

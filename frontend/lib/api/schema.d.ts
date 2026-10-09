@@ -9,8 +9,20 @@
  * FastAPI backend — frontend tidak menghitung ulang angka, hanya menampilkan.
  */
 
-/** Peran pengguna. 2 role cukup untuk MVP (lihat frontend.md §Hukum 5). */
-export type Role = "sppg_staff" | "dinas_admin";
+/**
+ * Peran pengguna.
+ *  - sppg_head        : Kepala SPPG, bisa approve, scope terbatas per region
+ *  - sppg_nutritionist: Ahli gizi SPPG, bisa approve, scope terbatas per region
+ *  - bgn_monitor      : Monitor BGN, read-only, tidak ada batasan lokasi
+ *  - sppg_staff       : (legacy) Staff SPPG, bisa approve untuk locationId-nya
+ *  - dinas_admin      : (legacy) Admin Dinas, bisa approve semua lokasi
+ */
+export type Role =
+  | "sppg_head"
+  | "sppg_nutritionist"
+  | "bgn_monitor"
+  | "sppg_staff"
+  | "dinas_admin";
 
 /** Nama komoditas yang di-scope untuk demo: 3 komoditas x 10 lokasi. */
 export type CommodityName = "telur" | "ayam" | "wortel";
@@ -23,10 +35,12 @@ export type CommodityName = "telur" | "ayam" | "wortel";
 export type DecisionStatus =
   | "proposed"
   | "verifier_flagged"
+  | "verifier_unavailable"
   | "pending_approval"
   | "approved"
   | "rejected"
-  | "executed";
+  | "executed"
+  | "expired";
 
 /**
  * Jenis keputusan (Schema.md §3 `decisions.decision_type`). Dipakai untuk
@@ -217,7 +231,18 @@ export interface Recommendation {
   reason: string;
   createdAt: string;
   approvedAt?: string;
+  /**
+   * Batas waktu eksekusi (Schema.md §3 `decisions.expires_at`) =
+   * min(batch.usable_until, SLA per komoditas). Lewat batas → status `expired`,
+   * tidak pernah `executed` (Schema.md §6).
+   */
+  expiresAt?: string;
   executedAt?: string;
+  /**
+   * Hasil setelah barang diterima/dicek (Schema.md §3 `decisions.outcome`) —
+   * basis mekanisme LEARN (Skill.md §10). NULL/'pending' = belum diperiksa.
+   */
+  outcome?: "pending" | "success" | "failure";
   /** Purchase order di SAP (mock) yang lahir dari approval keputusan ini. */
   sapPurchaseOrder?: SapPurchaseOrder;
   agentTrace?: AgentStep[];
@@ -238,6 +263,16 @@ export interface User {
   role: Role;
   /** Untuk sppg_staff, lokasi yang menjadi tanggung jawabnya. */
   locationId?: string;
+  /**
+   * Scope wilayah (region) untuk sppg_head & sppg_nutritionist.
+   * Bila diisi, user hanya bisa melihat / approve keputusan di region tersebut.
+   */
+  region?: string;
+  /**
+   * true  → user boleh melakukan approve/reject keputusan.
+   * false → read-only (bgn_monitor).
+   */
+  canApprove?: boolean;
 }
 
 /** Tujuh indikator kesuksesan (lihat frontend.md). */
@@ -263,6 +298,68 @@ export interface KpiSnapshot extends KPI {
   previous?: PreviousKpi;
 }
 
+/** Pemasok (Schema.md §1 `suppliers`) — skor kepercayaan diperbarui lewat LEARN (Skill.md §10). */
+export interface Supplier {
+  id: string;
+  name: string;
+  locationId: string;
+  /** 0..1, DEFAULT 0.80 di DB. Disetel deterministik dari `decisions.outcome`, bukan training model. */
+  reliabilityScore: number;
+}
+
+/** Hasil penerimaan barang (`decisions.outcome`, Schema.md §3). */
+export type DeliveryOutcome = "success" | "failure";
+
+/** Satu kejadian penerimaan untuk riwayat reliability pemasok (design.md §3.9c). */
+export interface SupplierDeliveryEvent {
+  at: string;
+  outcome: DeliveryOutcome;
+  decisionId: string;
+  commodityId: string;
+  quantityKg: number;
+  note?: string;
+}
+
+/** Body Receiving Inspection (design.md §3.5b). */
+export interface ReceivingInspectionRequest {
+  decisionId: string;
+  measuredTempC: number;
+  physicalCondition: "baik" | "rusak_sebagian" | "rusak";
+  note?: string;
+}
+
+/** Hasil Receiving Inspection: evidence `human_inspection` baru + `decisions.outcome` terisi. */
+export interface ReceivingInspectionResult {
+  decision: Recommendation;
+  evidenceId: string;
+  outcome: DeliveryOutcome;
+  /** true bila `failure` → menurunkan `reliability_score` pemasok (design.md §3.5b). */
+  affectsSupplierReliability: boolean;
+}
+
+/** Satu titik skor kepercayaan pemasok (hasil replay riwayat, bukan angka baru). */
+export interface SupplierScorePoint {
+  /** ISO timestamp kejadian; null = titik awal (skor sebelum histori). */
+  at: string | null;
+  score: number;
+  outcome: DeliveryOutcome | null;
+  /** true bila titik ini insiden/penurunan — dasar marker di grafik. */
+  isIncident: boolean;
+  decisionId?: string;
+}
+
+/**
+ * Riwayat pemasok untuk design.md §3.9c: skor sebelum/sesudah insiden.
+ * Dihitung backend dari `suppliers.reliability_score` + riwayat
+ * `decisions.outcome` (LEARN, Skill.md §10) — frontend tidak menghitung sendiri.
+ */
+export interface SupplierHistory {
+  supplierId: string;
+  currentScore: number;
+  points: SupplierScorePoint[];
+  events: SupplierDeliveryEvent[];
+}
+
 /** Request body untuk login. */
 export interface LoginRequest {
   username: string;
@@ -280,6 +377,10 @@ export interface JwtPayload {
   sub?: string;
   role?: Role;
   locationId?: string;
+  /** Scope wilayah untuk sppg_head & sppg_nutritionist. */
+  region?: string;
+  /** true = boleh approve; false = read-only. */
+  canApprove?: boolean;
   exp?: number;
   [key: string]: unknown;
 }

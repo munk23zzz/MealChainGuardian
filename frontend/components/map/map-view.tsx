@@ -5,7 +5,7 @@ import { Map, Marker, Popup, NavigationControl, setWorkerUrl } from "maplibre-gl
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Location } from "@/lib/api/schema";
 import type { LocationSupplySummary } from "@/lib/labels";
-import { locationStatusColor, locationStatusLabel } from "@/lib/design-tokens";
+import { locationStatusColor, locationStatusLabel, PALETTE } from "@/lib/design-tokens";
 import { formatKg } from "@/lib/format";
 
 /**
@@ -42,20 +42,20 @@ function popupHtml(
       (line) =>
         `<li style="display:flex;justify-content:space-between;gap:12px">
            <span>${escapeHtml(line.label)}</span>
-           <span style="color:#555">${escapeHtml(formatKg(line.usableStockKg))}</span>
+           <span style="color:${PALETTE.grey500}">${escapeHtml(formatKg(line.usableStockKg))}</span>
          </li>`,
     )
     .join("");
 
   return `
-    <div style="font:13px/1.45 Inter,system-ui,sans-serif;color:#1F3B4D;min-width:200px">
+    <div style="font:13px/1.45 Inter,system-ui,sans-serif;color:${PALETTE.navy900};min-width:200px">
       <strong>${escapeHtml(location.name)}</strong>
-      <div style="color:#555">${escapeHtml(location.region)} · ${escapeHtml(
+      <div style="color:${PALETTE.grey500}">${escapeHtml(location.region)} · ${escapeHtml(
         locationStatusLabel(location.status),
       )}</div>
       ${lines ? `<ul style="margin:6px 0 0;padding:0;list-style:none">${lines}</ul>` : ""}
       <a href="/decisions?location=${encodeURIComponent(location.id)}"
-         style="display:inline-block;margin-top:8px;color:#2E5266;font-weight:600">
+         style="display:inline-block;margin-top:8px;color:${PALETTE.brandBlue};font-weight:600">
         Lihat keputusan lokasi ini
       </a>
     </div>`;
@@ -148,7 +148,7 @@ export function MapView({
       el.style.height = `${size}px`;
       el.style.borderRadius = "9999px";
       el.style.backgroundColor = locationStatusColor(loc.status);
-      el.style.border = "2px solid #ffffff";
+      el.style.border = "2px solid white";
       el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.4)";
       el.style.opacity = muted ? "0.35" : "1";
       el.title = `${loc.name} — ${locationStatusLabel(loc.status)}`;

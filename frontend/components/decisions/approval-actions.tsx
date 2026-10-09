@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Factory, XCircle } from "lucide-react";
+import { CheckCircle2, Factory, ShieldAlert, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,9 +14,11 @@ import {
 } from "@/components/ui/dialog";
 import { ApprovalModal } from "@/components/decisions/approval-modal";
 import { StatusBadge } from "@/components/status/status-badge";
+import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/contexts/auth";
+import { useToast } from "@/components/ui/toast";
 import { approveDecision, executeDecision, rejectDecision } from "@/lib/api";
-import { canApproveForLocation } from "@/lib/auth";
+import { approvalDenialReason, canApproveForLocation } from "@/lib/auth";
 import type { Recommendation } from "@/lib/api/schema";
 
 /**
@@ -32,13 +34,17 @@ export function ApprovalActions({
   recommendation,
   locationLabel = (id) => id,
   commodityLabel = (id) => id,
+  locationRegion,
 }: {
   recommendation: Recommendation;
   locationLabel?: (id: string) => string;
   commodityLabel?: (id: string) => string;
+  /** Region dari lokasi target — dipakai untuk cek scope sppg_head/nutritionist. */
+  locationRegion?: string;
 }) {
   const queryClient = useQueryClient();
-  const { payload } = useAuth();
+  const { payload, canApprove: userCanApprove } = useAuth();
+  const { push } = useToast();
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -54,6 +60,12 @@ export function ApprovalActions({
       setApproveOpen(false);
       setError(null);
       invalidate();
+      // Jejak aksi: approval selalu memberi konfirmasi yang bisa dibaca ulang.
+      push({
+        title: "Approval tercatat",
+        description: `${recommendation.id} disetujui. Bila butuh dua approval, status berlanjut ke approver kedua.`,
+        tone: "success",
+      });
     },
     onError: (err: unknown) => {
       setError(err instanceof Error ? err.message : "Gagal menyetujui");
@@ -65,6 +77,13 @@ export function ApprovalActions({
     onSuccess: () => {
       setError(null);
       invalidate();
+      push({
+        title: "Diteruskan ke SAP (mock)",
+        description: recommendation.sapPurchaseOrder
+          ? `Purchase order ${recommendation.sapPurchaseOrder.poNumber} tercatat.`
+          : "Eksekusi tercatat di jejak audit.",
+        tone: "success",
+      });
     },
     onError: (err: unknown) => {
       setError(err instanceof Error ? err.message : "Gagal mengeksekusi");
@@ -78,23 +97,52 @@ export function ApprovalActions({
       setReason("");
       setError(null);
       invalidate();
+      push({
+        title: "Rekomendasi ditolak",
+        description: "Alasan tersimpan sebagai catatan audit.",
+        tone: "warning",
+      });
     },
     onError: (err: unknown) => {
       setError(err instanceof Error ? err.message : "Gagal menolak");
     },
   });
 
+  // Skill.md §9 + Schema.md §6: `verifier_flagged` DAN `verifier_unavailable`
+  // sama-sama butuh 2 approval (Kepala + Ahli Gizi dari SPPG yang sama).
   const canApprove =
     recommendation.status === "pending_approval" ||
-    recommendation.status === "verifier_flagged";
+    recommendation.status === "verifier_flagged" ||
+    recommendation.status === "verifier_unavailable";
   const canExecute = recommendation.status === "approved";
-  const permitted = canApproveForLocation(payload, recommendation.targetLocationId);
+  const permitted =
+    userCanApprove &&
+    canApproveForLocation(payload, recommendation.targetLocationId, locationRegion);
+
+  /**
+   * Alasan penolakan untuk kalimat penjelasan; dihitung lewat lokasi semu
+   * (id + region) agar memakai aturan yang SAMA dengan otorisasi — tidak ada dua
+   * definisi "wilayah" yang bisa berbeda diam-diam.
+   */
+  const denialReason = approvalDenialReason(payload, recommendation, [
+    { id: recommendation.targetLocationId, region: locationRegion },
+  ]);
 
   if (!canApprove && !canExecute) {
     return (
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-4">
         <span className="font-medium text-navy-900">Status keputusan:</span>
         <StatusBadge kind="decision" value={recommendation.status} />
+        {recommendation.status === "expired" && (
+          <span className="text-muted-foreground">
+            Lewat batas waktu
+            {recommendation.expiresAt
+              ? ` (${formatDateTime(recommendation.expiresAt)})`
+              : ""}{" "}
+            — keputusan kedaluwarsa tidak pernah dieksekusi (Schema.md §6); Supervisor
+            mengulang dari DETECT dengan data terbaru.
+          </span>
+        )}
         {recommendation.sapPurchaseOrder && (
           <span className="text-muted-foreground">
             SAP PO {recommendation.sapPurchaseOrder.poNumber} (
@@ -105,15 +153,34 @@ export function ApprovalActions({
     );
   }
 
+  // Read-only user (bgn_monitor) — tampilkan status tanpa tombol aksi
+  if (!userCanApprove) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-4">
+        <span className="font-medium text-navy-900">Status keputusan:</span>
+        <StatusBadge kind="decision" value={recommendation.status} />
+        <span className="ml-auto text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md">
+          Read-only — akun Anda tidak memiliki hak approve
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
       <h2 className="font-semibold text-navy-900">Keputusan Anda</h2>
 
       {canApprove && !permitted && (
-        <p className="text-muted-foreground">
-          Anda tidak punya hak approval untuk lokasi tujuan ini (
-          {locationLabel(recommendation.targetLocationId)}). Hubungi admin
-          Dinas/BGN.
+        <p className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-navy-900">
+          <ShieldAlert
+            className="mt-0.5 h-4 w-4 shrink-0 text-navy-700"
+            aria-hidden
+          />
+          <span>
+            {denialReason === "outside-region"
+              ? `Lokasi tujuan (${locationLabel(recommendation.targetLocationId)}) di luar wilayah tanggung jawab Anda — approval dilakukan Kepala/Ahli Gizi SPPG di wilayah lokasi tersebut.`
+              : `Anda tidak punya hak approval untuk lokasi tujuan ini (${locationLabel(recommendation.targetLocationId)}).`}
+          </span>
         </p>
       )}
 

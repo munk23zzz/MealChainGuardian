@@ -22,3 +22,18 @@ export function RoleGate({
   }
   return <>{children}</>;
 }
+
+/**
+ * Render anak hanya jika user boleh approve (canApprove === true).
+ * bgn_monitor dan siapa pun dengan canApprove=false akan melihat fallback.
+ */
+export function ApproveGate({
+  children,
+  fallback = null,
+}: {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+}) {
+  const { canApprove } = useAuth();
+  return canApprove ? <>{children}</> : <>{fallback}</>;
+}

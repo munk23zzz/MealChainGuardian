@@ -23,8 +23,12 @@ interface AuthContextValue {
   payload: JwtPayload | null;
   user: User | null;
   role: JwtPayload["role"] | null;
-  /** Lokasi tanggung jawab untuk sppg_staff (null untuk dinas_admin). */
+  /** Lokasi tanggung jawab untuk sppg_staff (null untuk role lain). */
   locationId: string | null;
+  /** Scope wilayah untuk sppg_head & sppg_nutritionist. */
+  region: string | null;
+  /** true = boleh approve/reject; false = read-only (bgn_monitor). */
+  canApprove: boolean;
   /** true saat token valid (ada, belum expired, punya payload). */
   isAuthenticated: boolean;
   /**
@@ -75,12 +79,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAuthenticated = payload !== null && !isTokenExpired(payload);
     return {
       payload,
-      // payload.sub bisa dipakai sebagai id; nama/role dari claims.
       user: payload
         ? { id: payload.sub ?? "", name: "", role: payload.role ?? "sppg_staff" }
         : null,
       role: payload?.role ?? null,
       locationId: payload?.locationId ?? null,
+      region: payload?.region ?? null,
+      canApprove: payload?.canApprove !== false && payload?.role !== "bgn_monitor",
       isAuthenticated,
       status: !hydrated
         ? "loading"

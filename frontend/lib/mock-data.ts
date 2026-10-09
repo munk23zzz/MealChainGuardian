@@ -12,12 +12,16 @@
  * - `agent_traces`: tool, input_summary, output_summary, duration_ms, step_at
  *
  * Akun demo:
- *   username: admin | password: admin | role: dinas_admin
- *   username: staff | password: staff | role: sppg_staff (locationId: loc-1)
+ *   username: sppg.head@demo.local         | password: Demo#SPPG2026 | role: sppg_head        | region: DKI Jakarta  | canApprove: true
+ *   username: sppg.nutritionist@demo.local | password: Demo#Nut2026  | role: sppg_nutritionist | region: Jawa Barat  | canApprove: true
+ *   username: bgn.monitor@demo.local       | password: Demo#BGN2026  | role: bgn_monitor       | region: -           | canApprove: false (read-only)
  *
  * Alur demo (design.md §2): Event 1 diwakili dec-001 (regional balance),
  * Event 2 dec-003 (price anomaly), Event 3 dec-002/dec-004 (safety disruption).
  */
+import type { ModelSource } from "./agent-log";
+import { reliabilitySeries } from "./reliability";
+import type { Supplier, SupplierHistory, SupplierDeliveryEvent } from "./api/schema";
 import type {
   AgentStep,
   Commodity,
@@ -58,18 +62,39 @@ function minutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60 * 1000).toISOString();
 }
 
+/**
+ * Waktu relatif ke depan (menit) — untuk `decisions.expires_at` (Schema.md §3),
+ * supaya countdown di layar keputusan benar-benar berjalan saat demo.
+ */
+function minutesFromNow(minutes: number): string {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
 const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
 
-export const MOCK_TOKEN_ADMIN = makeMockJwt({
-  sub: "user-admin",
-  role: "dinas_admin",
+// sppg_head — Jakarta, bisa approve
+export const MOCK_TOKEN_SPPG_HEAD = makeMockJwt({
+  sub: "user-sppg-head",
+  role: "sppg_head",
+  region: "DKI Jakarta",
+  canApprove: true,
   exp,
 });
 
-export const MOCK_TOKEN_STAFF = makeMockJwt({
-  sub: "user-staff-1",
-  role: "sppg_staff",
-  locationId: "loc-1",
+// sppg_nutritionist — Bogor, bisa approve
+export const MOCK_TOKEN_NUTRITIONIST = makeMockJwt({
+  sub: "user-nutritionist",
+  role: "sppg_nutritionist",
+  region: "Jawa Barat",
+  canApprove: true,
+  exp,
+});
+
+// bgn_monitor — tanpa batasan lokasi, read-only
+export const MOCK_TOKEN_BGN = makeMockJwt({
+  sub: "user-bgn-monitor",
+  role: "bgn_monitor",
+  canApprove: false,
   exp,
 });
 
@@ -78,26 +103,44 @@ export const MOCK_TOKEN_STAFF = makeMockJwt({
 // ---------------------------------------------------------------------------
 
 export const MOCK_USERS: Record<string, { password: string; token: string; user: User }> = {
-  admin: {
-    password: "admin",
-    token: MOCK_TOKEN_ADMIN,
-    user: { id: "user-admin", name: "Admin Dinas/BGN", role: "dinas_admin" },
-  },
-  staff: {
-    password: "staff",
-    token: MOCK_TOKEN_STAFF,
+  "sppg.head@demo.local": {
+    password: "Demo#SPPG2026",
+    token: MOCK_TOKEN_SPPG_HEAD,
     user: {
-      id: "user-staff-1",
-      name: "Staff SPPG Jakarta Pusat",
-      role: "sppg_staff",
-      locationId: "loc-1",
+      id: "user-sppg-head",
+      name: "Kepala SPPG Jakarta",
+      role: "sppg_head",
+      region: "DKI Jakarta",
+      canApprove: true,
+    },
+  },
+  "sppg.nutritionist@demo.local": {
+    password: "Demo#Nut2026",
+    token: MOCK_TOKEN_NUTRITIONIST,
+    user: {
+      id: "user-nutritionist",
+      name: "Ahli Gizi SPPG Bogor",
+      role: "sppg_nutritionist",
+      region: "Jawa Barat",
+      canApprove: true,
+    },
+  },
+  "bgn.monitor@demo.local": {
+    password: "Demo#BGN2026",
+    token: MOCK_TOKEN_BGN,
+    user: {
+      id: "user-bgn-monitor",
+      name: "Monitor BGN",
+      role: "bgn_monitor",
+      canApprove: false,
     },
   },
 };
 
 export const MOCK_LOGIN_RESPONSES: Record<string, LoginResponse> = {
-  admin: { token: MOCK_TOKEN_ADMIN, user: MOCK_USERS.admin.user },
-  staff: { token: MOCK_TOKEN_STAFF, user: MOCK_USERS.staff.user },
+  "sppg.head@demo.local": { token: MOCK_TOKEN_SPPG_HEAD,    user: MOCK_USERS["sppg.head@demo.local"].user },
+  "sppg.nutritionist@demo.local": { token: MOCK_TOKEN_NUTRITIONIST, user: MOCK_USERS["sppg.nutritionist@demo.local"].user },
+  "bgn.monitor@demo.local": { token: MOCK_TOKEN_BGN,        user: MOCK_USERS["bgn.monitor@demo.local"].user },
 };
 
 // ---------------------------------------------------------------------------
@@ -167,8 +210,17 @@ export const MOCK_DEMAND: DemandRecord[] = [
 // Recommendations / Decisions
 // ---------------------------------------------------------------------------
 
-/** Trace 8 langkah (DETECT → LEARN) — mengikuti tool contract di Skill.md §5. */
-function fullTrace(startedMinutesAgo: number): AgentStep[] {
+/** Trace 8 langkah (DETECT → LEARN) — mengikuti tool contract di Skill.md §5.
+ *
+ * `forecastSource` menunjukkan provider yang benar-benar dipakai model prakiraan
+ * demand: suffix `[primary]`/`[fallback_1]`/`[fallback_2]` wajib ada (Schema.md
+ * §6 + Architecture.md §10.4) supaya pemakaian fallback terlihat di Agent Log
+ * (design.md §3.4b) — bukan disembunyikan.
+ */
+function fullTrace(
+  startedMinutesAgo: number,
+  forecastSource: ModelSource = "primary",
+): AgentStep[] {
   const at = (offset: number) => minutesAgo(startedMinutesAgo - offset);
   return [
     {
@@ -200,9 +252,10 @@ function fullTrace(startedMinutesAgo: number): AgentStep[] {
     },
     {
       step: "PREDICT",
-      tool: "freshness.evaluate",
-      inputSummary: "{ batch_id: 'BATCH-4471' }",
-      outputSummary: "{ freshness_score: 0.82, status: 'pass' }",
+      tool: `demand.forecast[${forecastSource}]`,
+      inputSummary:
+        "{ location_id: 'loc-2', commodity_id: 'com-telur', horizon_days: 2 }",
+      outputSummary: "{ forecast_demand_kg: 500, method: 'moving_average_7d' }",
       durationMs: 288,
       stepAt: at(3),
       timestamp: at(3),
@@ -260,6 +313,8 @@ export const MOCK_DECISIONS: Recommendation[] = [
     reason:
       "Jakarta Utara defisit 220 kg telur untuk distribusi MBG 2 hari ke depan. Gudang Cianjur punya surplus 2.300 kg dengan harga dan jarak paling efisien; total Safe Delivered Cost Rp 26.100/kg.",
     createdAt: minutesAgo(24),
+    // Countdown demo: masih lega (>2 jam) — design.md §3.3.
+    expiresAt: minutesFromNow(130),
     evidence: {
       sap: true,
       iot: true,
@@ -369,6 +424,8 @@ export const MOCK_DECISIONS: Recommendation[] = [
     reason:
       "Stok ayam Jakarta Selatan kritis (usable 40 kg dari 50 kg fisik; satu batch FAIL karena kedaluwarsa). Kandidat Jakarta Barat lolos safety, tapi bukti IoT untuk lokasi tujuan tidak tersedia sehingga Verifier meminta verifikasi manusia.",
     createdAt: minutesAgo(58),
+    // Mendesak (di bawah 2 jam) + butuh 2 approval → cerita "decision time".
+    expiresAt: minutesFromNow(26),
     evidence: {
       sap: true,
       iot: false,
@@ -447,7 +504,7 @@ export const MOCK_DECISIONS: Recommendation[] = [
         evidenceCompleteness: 72,
       },
     ],
-    agentTrace: fullTrace(58),
+    agentTrace: fullTrace(58, "fallback_1"),
   },
   {
     // Event 2: price anomaly (harga pasar menyimpang dari referensi)
@@ -562,6 +619,8 @@ export const MOCK_DECISIONS: Recommendation[] = [
     reason:
       "Stok telur Jakarta Utara mengalami temperature excursion (rantai dingin terputus 4 jam). Batch gagal safety check sehingga tidak layak dialokasikan — kandidat ini gugur dan tidak muncul sebagai opsi.",
     createdAt: minutesAgo(300),
+    // Sudah lewat batas → badge "Kedaluwarsa" (Schema.md §6: tidak pernah executed).
+    expiresAt: minutesAgo(60),
     evidence: {
       sap: true,
       iot: true,
@@ -710,6 +769,104 @@ export const MOCK_KPI_PREVIOUS: PreviousKpi = {
   averageDecisionTimeMinutes: 26,
   evidenceCompletenessPercent: 76,
 };
+
+// ---------------------------------------------------------------------------
+// Pemasok + riwayat penerimaan (design.md §3.9c, Schema.md §1 `suppliers`)
+// ---------------------------------------------------------------------------
+/**
+ * Skor SEBELUM histori yang kita miliki. Bukan angka baru: Schema.md §1
+ * (`suppliers.reliability_score` DEFAULT 0.80) dan pemasok lama memang sudah
+ * punya riwayat lebih panjang sebelum keputusan yang ada di feed.
+ */
+const SUPPLIER_BASE_SCORES: Record<string, number> = {
+  "SUP-001": 0.8,
+  "SUP-002": 0.85,
+  "SUP-003": 0.88,
+  "SUP-004": 0.92,
+  "SUP-005": 0.8,
+  "SUP-006": 0.75,
+};
+
+/** Nama & lokasi asal pemasok — id-nya sama dengan yang dipakai label kandidat di keputusan. */
+const SUPPLIER_PROFILES: Record<string, { name: string; locationId: string }> = {
+  "SUP-001": { name: "Koperasi Cianjur", locationId: "loc-10" },
+  "SUP-002": { name: "Distributor Jakarta Barat", locationId: "loc-3" },
+  "SUP-003": { name: "Distributor Jakarta Barat", locationId: "loc-3" },
+  "SUP-004": { name: "Pasar Induk Bogor", locationId: "loc-6" },
+  "SUP-005": { name: "Pasar Induk Kramat Jati", locationId: "loc-5" },
+  "SUP-006": { name: "Supplier Bogor lokal", locationId: "loc-6" },
+};
+
+/**
+ * Riwayat penerimaan per pemasok (basis LEARN, Skill.md §10).
+ * `dec-090`..`dec-107` adalah keputusan lama di luar feed aktif — riwayat inilah
+ * yang membuat SUP-001 Koperasi Cianjur turun setelah dua insiden suhu, dan itu
+ * yang membuatnya kalah dari SUP-004 di keputusan BERIKUTNYA (narasi Skill.md §11).
+ */
+export const MOCK_SUPPLIER_EVENTS: Record<string, SupplierDeliveryEvent[]> = {
+  "SUP-001": [
+    { at: "2026-09-22T09:10:00.000Z", outcome: "success", decisionId: "dec-090", commodityId: "com-telur", quantityKg: 120 },
+    { at: "2026-09-25T09:05:00.000Z", outcome: "success", decisionId: "dec-091", commodityId: "com-telur", quantityKg: 140 },
+    { at: "2026-09-28T09:20:00.000Z", outcome: "success", decisionId: "dec-092", commodityId: "com-ayam", quantityKg: 90 },
+    { at: "2026-10-01T09:00:00.000Z", outcome: "failure", decisionId: "dec-093", commodityId: "com-telur", quantityKg: 130, note: "Suhu tiba 9,4 °C (di atas ambang 8 °C)" },
+    { at: "2026-10-05T09:15:00.000Z", outcome: "success", decisionId: "dec-094", commodityId: "com-telur", quantityKg: 110 },
+    { at: "2026-10-07T02:35:00.000Z", outcome: "failure", decisionId: "dec-095", commodityId: "com-telur", quantityKg: 150, note: "Temperature excursion 6 jam — batch dinyatakan FAIL" },
+  ],
+  "SUP-002": [
+    { at: "2026-09-30T08:40:00.000Z", outcome: "success", decisionId: "dec-096", commodityId: "com-telur", quantityKg: 150 },
+    { at: "2026-10-04T08:45:00.000Z", outcome: "success", decisionId: "dec-097", commodityId: "com-telur", quantityKg: 130 },
+  ],
+  "SUP-003": [
+    { at: "2026-09-20T07:55:00.000Z", outcome: "success", decisionId: "dec-098", commodityId: "com-wortel", quantityKg: 200 },
+    { at: "2026-09-27T08:10:00.000Z", outcome: "success", decisionId: "dec-099", commodityId: "com-wortel", quantityKg: 180 },
+    { at: "2026-10-03T08:05:00.000Z", outcome: "success", decisionId: "dec-100", commodityId: "com-ayam", quantityKg: 160 },
+  ],
+  "SUP-004": [
+    { at: "2026-09-24T08:30:00.000Z", outcome: "success", decisionId: "dec-101", commodityId: "com-telur", quantityKg: 140 },
+    { at: "2026-09-29T08:25:00.000Z", outcome: "success", decisionId: "dec-102", commodityId: "com-wortel", quantityKg: 175 },
+    { at: "2026-10-06T08:35:00.000Z", outcome: "success", decisionId: "dec-103", commodityId: "com-telur", quantityKg: 120 },
+  ],
+  "SUP-005": [
+    { at: "2026-09-26T08:50:00.000Z", outcome: "success", decisionId: "dec-104", commodityId: "com-ayam", quantityKg: 150 },
+    { at: "2026-10-02T09:25:00.000Z", outcome: "failure", decisionId: "dec-105", commodityId: "com-ayam", quantityKg: 145, note: "Rusak sebagian 12 kg saat bongkar muat" },
+  ],
+  "SUP-006": [
+    { at: "2026-09-23T08:15:00.000Z", outcome: "success", decisionId: "dec-106", commodityId: "com-wortel", quantityKg: 95 },
+    { at: "2026-10-06T08:20:00.000Z", outcome: "success", decisionId: "dec-107", commodityId: "com-telur", quantityKg: 100 },
+  ],
+};
+
+/**
+ * `reliability_score` DIHITUNG dari riwayat di atas lewat replay LEARN yang sama
+ * dengan yang dipakai UI (`lib/reliability.ts`) — satu sumber, tidak ada angka
+ * yang diketik dua kali dan bisa jadi tidak sinkron.
+ */
+export const MOCK_SUPPLIERS: Supplier[] = Object.keys(SUPPLIER_PROFILES).map((id) => {
+  const events = MOCK_SUPPLIER_EVENTS[id] ?? [];
+  const series = reliabilitySeries(SUPPLIER_BASE_SCORES[id] ?? 0.8, events);
+  return {
+    id,
+    name: SUPPLIER_PROFILES[id].name,
+    locationId: SUPPLIER_PROFILES[id].locationId,
+    reliabilityScore: series[series.length - 1].score,
+  };
+});
+
+/**
+ * Riwayat pemasok untuk layar §3.9c. Replay memakai fungsi yang sama dengan
+ * LEARN di produksi, jadi grafik "sebelum/sesudah insiden" tidak bisa berbohong.
+ * Skor terkini di `MOCK_SUPPLIERS` disegarkan dari hasil replay (satu sumber).
+ */
+export function mockSupplierHistory(supplierId: string): SupplierHistory | null {
+  const profile = SUPPLIER_PROFILES[supplierId];
+  if (!profile) return null;
+  const events = MOCK_SUPPLIER_EVENTS[supplierId] ?? [];
+  const points = reliabilitySeries(SUPPLIER_BASE_SCORES[supplierId] ?? 0.8, events);
+  const currentScore = points[points.length - 1].score;
+  const supplier = MOCK_SUPPLIERS.find((s) => s.id === supplierId);
+  if (supplier) supplier.reliabilityScore = currentScore;
+  return { supplierId, currentScore, points, events };
+}
 
 // ---------------------------------------------------------------------------
 // Commodities — 3 komoditas yang di-scope untuk demo

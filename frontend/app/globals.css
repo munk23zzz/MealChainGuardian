@@ -3,49 +3,110 @@
 @tailwind utilities;
 
 /*
- * Palet warna dari Afghan Product Dashboard:
- *   #0969DA  = Sidebar & Header background       → 211 93% 45%
- *   #0550AE  = Item aktif sidebar                → 211 91% 34%
- *   #10B981  = Hijau (approve/success)           → 160 84% 39%
- *   #F97316  = Orange (warning/action)           → 25 95% 53%
- *   #A855F7  = Ungu (accent)                     → 271 91% 65%
- *   #EF4444  = Merah (danger)                    → 0 84% 60%
- *   #F5F6FA  = Background luar konten            → 225 33% 97%
- *   #FFFFFF  = Card / konten utama               → 0 0% 100%
- *   #1E293B  = Teks utama                        → 215 28% 17%
- *   #64748B  = Teks sekunder / muted             → 215 16% 47%
+ * Token warna design.md §4 (hybrid):
+ *   #1F3B4D  navy-900 = teks utama & heading      → 204 43% 21%
+ *   #2E5266  navy-700 = aksen sekunder            → 201 38% 29%
+ *   #DCE6E9  navy-100 = border & permukaan netral → 194 23% 89%
+ *   #555555  grey-500 = teks sekunder             → 0 0% 33%
+ *   #0969DA  brand    = header/sidebar/tombol     → 211 93% 45%
+ *   #0550AE  brand-active = aktif/hover           → 211 91% 34%
+ *   #F5F6FA  surface  = latar halaman             → 225 33% 97%
+ *   status: safe #2E7D32, warning #F9A825, danger #C62828
+ * Semua nilai di bawah hanya boleh berasal dari palet itu.
  */
 @layer base {
   :root {
-    --background: 225 33% 97%;        /* #F5F6FA — bg luar konten */
-    --foreground: 215 28% 17%;        /* #1E293B — teks utama */
+    --background: 225 33% 97%;        /* #F5F6FA — latar halaman */
+    --foreground: 204 43% 21%;        /* #1F3B4D — teks utama */
 
     --card: 0 0% 100%;                /* #FFFFFF — card putih */
-    --card-foreground: 215 28% 17%;
+    --card-foreground: 204 43% 21%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 28% 17%;
+    --popover-foreground: 204 43% 21%;
 
-    --primary: 211 93% 45%;           /* #0969DA — aksen / tombol aktif */
+    --primary: 211 93% 45%;           /* #0969DA — aksi / tombol primer */
     --primary-foreground: 0 0% 100%;
 
     --secondary: 225 33% 97%;         /* #F5F6FA */
-    --secondary-foreground: 215 28% 17%;
+    --secondary-foreground: 204 43% 21%;
 
     --muted: 225 33% 97%;             /* #F5F6FA */
-    --muted-foreground: 215 16% 47%;  /* #64748B */
+    --muted-foreground: 0 0% 33%;     /* #555555 */
 
-    --accent: 271 91% 65%;            /* #A855F7 — ungu */
-    --accent-foreground: 0 0% 100%;
+    --accent: 211 93% 96%;            /* tint biru brand (hover) */
+    --accent-foreground: 204 43% 21%;
 
-    --destructive: 0 84% 60%;         /* #EF4444 — merah */
+    --destructive: 0 66% 47%;         /* #C62828 — status danger */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 215 20% 88%;
-    --input: 215 20% 85%;
-    --ring: 211 93% 45%;
+    --border: 194 23% 89%;            /* #DCE6E9 */
+    --input: 194 23% 85%;
+    --ring: 211 93% 45%;              /* #0969DA */
 
     --radius: 0.5rem;
+  }
+}
+
+/*
+ * Gerak/motion — dipakai hemat dan selalu bisa dimatikan pengguna.
+ *
+ * Aturan: animasi hanya untuk (a) memperkenalkan konten yang baru muncul,
+ * (b) menandai sesuatu yang hidup/berjalan (polling). Tidak ada animasi dekoratif
+ * di elemen status — status harus terbaca instan (design.md §4 prinsip 2).
+ */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  @keyframes mcx-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes mcx-live {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.4;
+      transform: scale(0.85);
+    }
+  }
+
+  /* Konten masuk: dipakai pada kartu/seksi, dengan animation-delay bertahap. */
+  .animate-fade-up {
+    animation: mcx-fade-up 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Titik "live" saat data sedang diperbarui. */
+  .animate-live {
+    animation: mcx-live 1.6s ease-in-out infinite;
   }
 }
 

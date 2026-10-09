@@ -14,6 +14,23 @@ describe("isProtectedPath", () => {
     expect(isProtectedPath("/kpi")).toBe(true);
   });
 
+  it("true untuk SEMUA halaman di grup (protected)", () => {
+    // Bug lama: /receiving & /suppliers tidak terdaftar sehingga halaman kosong
+    // tanpa redirect saat belum login.
+    for (const path of [
+      "/receiving",
+      "/suppliers",
+      "/today",
+      "/compliance",
+      "/surplus",
+      "/quality",
+      "/sources",
+    ]) {
+      expect(isProtectedPath(path)).toBe(true);
+      expect(isProtectedPath(`${path}/detail`)).toBe(true);
+    }
+  });
+
   it("false untuk login dan root", () => {
     expect(isProtectedPath("/login")).toBe(false);
     expect(isProtectedPath("/")).toBe(false);

@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Lock, ShieldCheck } from "lucide-react";
 import { RecommendationCard } from "@/components/decisions/recommendation-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonCard } from "@/components/ui/skeleton";
@@ -12,6 +13,7 @@ import {
   useDecisions,
   useLocations,
 } from "@/hooks/use-data";
+import { useAuth } from "@/contexts/auth";
 import {
   commodityLabel,
   locationLabel,
@@ -19,6 +21,12 @@ import {
 } from "@/lib/labels";
 import { sortRecommendationsByUrgency } from "@/lib/urgency";
 import { decisionStatusLabel } from "@/lib/design-tokens";
+import { scopeForRole } from "@/lib/role";
+import {
+  decisionTouchesScope,
+  partitionByScope,
+  scopeDescription,
+} from "@/lib/scope";
 import { cn } from "@/lib/utils";
 import type { DecisionStatus } from "@/lib/api/schema";
 
@@ -26,10 +34,15 @@ const STATUS_FILTERS: { value: "all" | DecisionStatus; label: string }[] = [
   { value: "all", label: "Semua" },
   { value: "proposed", label: decisionStatusLabel("proposed") },
   { value: "verifier_flagged", label: decisionStatusLabel("verifier_flagged") },
+  {
+    value: "verifier_unavailable",
+    label: decisionStatusLabel("verifier_unavailable"),
+  },
   { value: "pending_approval", label: decisionStatusLabel("pending_approval") },
   { value: "approved", label: decisionStatusLabel("approved") },
   { value: "rejected", label: decisionStatusLabel("rejected") },
   { value: "executed", label: decisionStatusLabel("executed") },
+  { value: "expired", label: decisionStatusLabel("expired") },
 ];
 
 /**
@@ -67,26 +80,57 @@ function DecisionsPageInner() {
   );
   const decisions = useMemo(() => data ?? [], [data]);
 
+  // --- Peran & cakupan data (design.md §1.4 "role-aware by default") ---
+  const { role, region, locationId, canApprove } = useAuth();
+  const [showAllScopes, setShowAllScopes] = useState(false);
+
+  const roleScope = useMemo(
+    () => scopeForRole(role, { region, locationId }),
+    [role, region, locationId],
+  );
+
+  /**
+   * Bawaan = cakupan peran saja, TAPI user bisa membukanya sendiri. Membatasi
+   * tanpa jalan keluar bukan transparansi; karena itu jumlah data di luar cakupan
+   * selalu disebut di banner.
+   */
+  const effectiveScope = useMemo(
+    () => (showAllScopes ? ({ kind: "all" } as const) : roleScope),
+    [showAllScopes, roleScope],
+  );
+
+  const { inScope, outOfScope } = useMemo(
+    () =>
+      partitionByScope(decisions, (d) =>
+        decisionTouchesScope(d, effectiveScope, locations),
+      ),
+    [decisions, effectiveScope, locations],
+  );
+
   const visible = useMemo(() => {
     const byLocation = locationFilter
-      ? recommendationsForLocation(decisions, locationFilter)
-      : decisions;
+      ? recommendationsForLocation(inScope, locationFilter)
+      : inScope;
     const byStatus =
       statusFilter === "all"
         ? byLocation
         : byLocation.filter((d) => d.status === statusFilter);
     return sortRecommendationsByUrgency(byStatus);
-  }, [decisions, locationFilter, statusFilter]);
+  }, [inScope, locationFilter, statusFilter]);
 
   const counts = useMemo(
     () => ({
-      pending: decisions.filter(
-        (d) => d.status === "pending_approval" || d.status === "verifier_flagged",
+      // flagged & verifier_unavailable sama-sama butuh 2 approval (Schema.md §6).
+      pending: inScope.filter(
+        (d) =>
+          d.status === "pending_approval" ||
+          d.status === "verifier_flagged" ||
+          d.status === "verifier_unavailable",
       ).length,
-      flagged: decisions.filter((d) => d.verifierNote).length,
-      executed: decisions.filter((d) => d.status === "executed").length,
+      flagged: inScope.filter((d) => d.verifierNote).length,
+      executed: inScope.filter((d) => d.status === "executed").length,
     }),
-    [decisions],
+    [inScope],
   );
 
   return (
@@ -116,6 +160,36 @@ function DecisionsPageInner() {
         />
       )}
 
+      {/* Cakupan data per peran; jumlah di luar cakupan selalu disebut. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <p className="flex items-center gap-2 text-sm text-navy-900">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+            <span>{scopeDescription(effectiveScope, outOfScope.length)}</span>
+          </p>
+          {roleScope.kind !== "all" && (
+            <button
+              type="button"
+              onClick={() => setShowAllScopes((v) => !v)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
+            >
+              {showAllScopes ? "Batasi ke cakupan saya" : "Tampilkan semua wilayah"}
+            </button>
+          )}
+        </CardContent>
+      </Card>
+
+      {!canApprove && (
+        <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-navy-900">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-navy-700" aria-hidden />
+          <span>
+            Peran Anda bersifat <strong>read-only</strong> — penilaian dan approval
+            keputusan dilakukan Kepala/Ahli Gizi SPPG. Semua bukti, trace, dan
+            riwayat tetap bisa dibaca seperti biasa.
+          </span>
+        </p>
+      )}
+
       {locationFilter && (
         <Card>
           <CardContent className="flex items-center justify-between gap-3 py-3">
@@ -125,7 +199,7 @@ function DecisionsPageInner() {
                 {locationLabel(locationFilter, locations)}
               </strong>
             </p>
-            <a href="/decisions" className="text-navy-700 hover:underline">
+            <a href="/decisions" className="text-brand hover:underline">
               Tampilkan semua lokasi
             </a>
           </CardContent>
@@ -137,11 +211,10 @@ function DecisionsPageInner() {
           <button
             key={s.value}
             onClick={() => setStatusFilter(s.value)}
-            style={statusFilter === s.value ? { backgroundColor: "#0969DA", borderColor: "#0969DA", color: "#fff" } : undefined}
             className={cn(
               "rounded-md border px-3 py-1.5 text-sm transition-colors",
               statusFilter === s.value
-                ? "text-white"
+                ? "border-brand bg-brand text-white"
                 : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
           >

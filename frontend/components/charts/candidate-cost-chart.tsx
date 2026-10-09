@@ -5,6 +5,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -33,31 +34,70 @@ export function CandidateCostChart({
   return (
     <div className="h-48 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={PALETTE.navy100} />
+        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 32, top: 4, bottom: 4 }}>
+          {/* Grid — garis vertikal saja (chart horizontal) */}
+          <CartesianGrid
+            strokeDasharray="4 3"
+            horizontal={false}
+            stroke={PALETTE.plotGrid}
+            strokeOpacity={0.6}
+          />
+
+          {/* Sumbu X — nilai Rupiah */}
           <XAxis
             type="number"
             tickFormatter={(v) => formatRupiah(v)}
             fontSize={11}
-            stroke={PALETTE.grey500}
+            tick={{ fill: PALETTE.grey500 }}
+            axisLine={{ stroke: PALETTE.plotGrid }}
+            tickLine={{ stroke: PALETTE.plotGrid }}
           />
+
+          {/* Sumbu Y — nama kandidat */}
           <YAxis
             type="category"
             dataKey="name"
             width={132}
             fontSize={11}
-            stroke={PALETTE.grey500}
+            tick={{ fill: PALETTE.grey500 }}
+            axisLine={{ stroke: PALETTE.plotGrid }}
+            tickLine={false}
           />
+
+          {/* Garis referensi nilai terendah */}
+          {cheapest !== Number.POSITIVE_INFINITY && (
+            <ReferenceLine
+              x={cheapest}
+              stroke={PALETTE.statusSafe}
+              strokeDasharray="4 3"
+              strokeWidth={1.5}
+              label={{
+                value: "terbaik",
+                position: "top",
+                fontSize: 10,
+                fill: PALETTE.statusSafe,
+              }}
+            />
+          )}
+
+          {/* Tooltip */}
           <Tooltip
-            formatter={(v) => `${formatRupiah(Number(v))}/kg`}
+            cursor={{ fill: "rgba(9,105,218,0.06)" }}
+            formatter={(v) => [`${formatRupiah(Number(v))}/kg`, "Safe Delivered Cost"]}
             contentStyle={{
               fontFamily: "Inter, system-ui, sans-serif",
               border: `1px solid ${PALETTE.navy100}`,
               borderRadius: 8,
               color: PALETTE.navy900,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
             }}
           />
-          <Bar dataKey="totalSafeDeliveredCostPerKg" radius={[0, 4, 4, 0]}>
+
+          <Bar
+            dataKey="totalSafeDeliveredCostPerKg"
+            radius={[0, 4, 4, 0]}
+            maxBarSize={28}
+          >
             {data.map((point) => (
               <Cell
                 key={point.name}

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ArrowRight, Compass, ShieldAlert, ShieldCheck } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -24,11 +24,17 @@ import {
   useDecision,
   useLocations,
 } from "@/hooks/use-data";
-import { getWinningCandidate } from "@/lib/decisions";
+import { getWinningCandidate, targetRegion } from "@/lib/decisions";
+import { useAuth } from "@/contexts/auth";
+import { scopeForRole } from "@/lib/role";
+import { decisionTouchesScope } from "@/lib/scope";
+import { ExpiryCountdown } from "@/components/decisions/expiry-countdown";
+import { MetricStrip } from "@/components/ui/metric-strip";
+import { expiryState } from "@/lib/expiry";
 import { commodityLabel, locationLabel } from "@/lib/labels";
 import { DECISION_TYPE_LABELS } from "@/lib/labels";
 import { urgencyLabel, urgencyTier } from "@/lib/urgency";
-import { formatDateTime, formatKg, formatRupiah } from "@/lib/format";
+import { formatDateTime, formatKg, formatPercent, formatRupiah } from "@/lib/format";
 
 /**
  * Decision Detail & Evidence (design.md §3.3).
@@ -46,6 +52,13 @@ export default function DecisionDetailPage() {
   const commoditiesQuery = useCommodities();
 
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data]);
+
+  /** Cakupan peran — keputusan di luar wilayah tetap bisa dibaca, tapi ditandai. */
+  const { role, region, locationId } = useAuth();
+  const roleScope = useMemo(
+    () => scopeForRole(role, { region, locationId }),
+    [role, region, locationId],
+  );
   const commodities = useMemo(
     () => commoditiesQuery.data ?? [],
     [commoditiesQuery.data],
@@ -75,16 +88,25 @@ export default function DecisionDetailPage() {
   const comLabel = (id: string) => commodityLabel(id, commodities);
   const tier = urgencyTier(decision);
 
+  const expiry = expiryState(decision.expiresAt);
+  const evidenceCount = decision.evidenceItems?.length ?? 0;
+  /** Ada aksi yang bisa diambil sekarang (approve/reject/eksekusi)? */
+  const actionable =
+    decision.status === "pending_approval" ||
+    decision.status === "verifier_flagged" ||
+    decision.status === "verifier_unavailable" ||
+    decision.status === "approved";
+
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <Link href="/decisions" className="text-navy-700 hover:underline">
+    <div className="flex flex-col gap-6 pb-4">
+      <div className="animate-fade-up">
+        <Link href="/decisions" className="text-brand hover:underline">
           ← Kembali ke feed
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-navy-900">
             {label(decision.sourceLocationId)}{" "}
-            <ArrowRight className="inline h-4 w-4" />{" "}
+            <ArrowRight className="inline h-4 w-4" aria-hidden />{" "}
             {label(decision.targetLocationId)}
           </h1>
           <StatusBadge kind="decision" value={decision.status} />
@@ -92,20 +114,77 @@ export default function DecisionDetailPage() {
           <ToneBadge tone={tier === 0 ? "danger" : tier === 1 ? "warning" : "info"}>
             {urgencyLabel(decision)}
           </ToneBadge>
+          {/* Countdown hanya relevan selama keputusan masih bisa dieksekusi;
+              pada keputusan yang sudah selesai (ditolak/dieksekusi) ini riwayat
+              dan hanya menambah bising. Nilai absolutnya tetap ada di MetricStrip. */}
+          {actionable && <ExpiryCountdown expiresAt={decision.expiresAt} />}
         </div>
         <p className="mt-1 text-muted-foreground">
           {DECISION_TYPE_LABELS[decision.decisionType]} · {comLabel(decision.commodityId)}{" "}
-          · {formatKg(decision.quantityKg)} · dibuat{" "}
-          {formatDateTime(decision.createdAt)}
+          · dibuat {formatDateTime(decision.createdAt)}
         </p>
+        {/* Dibuka dari tautan/riwayat di luar cakupan peran: katakan terus terang,
+            jangan biarkan tampak seperti keputusan biasa milik user ini. */}
+        {!decisionTouchesScope(decision, roleScope, locations) && (
+          <p className="mt-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-navy-900">
+            <strong>Di luar wilayah Anda.</strong> Keputusan ini di luar cakupan
+            peran Anda — boleh dibaca, tetapi approval tidak tersedia untuk akun
+            Anda.
+          </p>
+        )}
       </div>
 
+      {/* Angka kunci di atas — supaya keputusan bisa dinilai dalam sekali lihat */}
+      <MetricStrip
+        className="animate-fade-up"
+        items={[
+          {
+            label: "Kuantitas",
+            value: formatKg(decision.quantityKg),
+            hint: `dari ${label(decision.sourceLocationId)}`,
+          },
+          {
+            label: "Biaya kandidat terpilih",
+            value: winner ? `${formatRupiah(winner.totalSafeDeliveredCostPerKg)}/kg` : "-",
+            hint: winner ? winner.supplierId : "belum ada kandidat lolos",
+            tone: winner ? "safe" : "neutral",
+          },
+          {
+            label: "Kelengkapan bukti",
+            value: formatPercent(decision.evidence.completenessPercent),
+            hint: `${evidenceCount} bukti tercatat`,
+            tone:
+              decision.evidence.completenessPercent >= 90
+                ? "safe"
+                : decision.evidence.completenessPercent >= 70
+                  ? "warning"
+                  : "danger",
+          },
+          {
+            label: "Batas waktu eksekusi",
+            value: decision.expiresAt ? formatDateTime(decision.expiresAt) : "-",
+            hint: decision.expiresAt
+              ? "min(usable_until, SLA komoditas)"
+              : "tidak ada SLA tercatat",
+            tone:
+              expiry === "safe"
+                ? "safe"
+                : expiry === "warning" || expiry === "critical"
+                  ? "warning"
+                  : expiry === "expired"
+                    ? "danger"
+                    : "neutral",
+          },
+        ]}
+      />
+
       {decision.reason && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Alasan rekomendasi</CardTitle>
+        <Card className="animate-fade-up border-l-4 border-l-brand/60">
+          <CardHeader className="flex-row items-center gap-2 space-y-0">
+            <Compass className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+            <CardTitle>Kenapa sistem merekomendasikan ini</CardTitle>
           </CardHeader>
-          <CardContent className="pt-1">{decision.reason}</CardContent>
+          <CardContent className="pt-1 text-navy-900">{decision.reason}</CardContent>
         </Card>
       )}
 
@@ -228,11 +307,30 @@ export default function DecisionDetailPage() {
         </Card>
       )}
 
-      <ApprovalActions
-        recommendation={decision}
-        locationLabel={label}
-        commodityLabel={comLabel}
-      />
+      <div id="keputusan-anda" className="scroll-mt-24">
+        <ApprovalActions
+          recommendation={decision}
+          locationLabel={label}
+          commodityLabel={comLabel}
+          locationRegion={targetRegion(decision, locations)}
+        />
+      </div>
+
+      {/* Bar aksi melekat: keputusan bisa panjang, aksi utama tetap satu klik jauhnya */}
+      {actionable && (
+        <div className="pointer-events-none sticky bottom-3 z-30 flex justify-center">
+          <div className="animate-fade-up pointer-events-auto flex flex-wrap items-center gap-3 rounded-full border border-border bg-card/95 px-4 py-2 shadow-lg backdrop-blur">
+            <StatusBadge kind="decision" value={decision.status} />
+            <ExpiryCountdown expiresAt={decision.expiresAt} />
+            <a
+              href="#keputusan-anda"
+              className="rounded-full bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-active"
+            >
+              Tinjau &amp; setujui
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

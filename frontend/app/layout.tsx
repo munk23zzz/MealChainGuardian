@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/auth";
 import { QueryProvider } from "@/contexts/query";
+import { ToastProvider } from "@/components/ui/toast";
+import { PwaRegister } from "@/components/ui/pwa-register";
 
 /**
  * design.md §4: font Inter (fallback system-ui) — jelas terbaca di data-dense
@@ -18,6 +20,19 @@ export const metadata: Metadata = {
   title: "MealChain Guardian",
   description:
     "Dashboard guardian untuk kontinuitas pasokan pangan institusional",
+  applicationName: "MealChain Guardian",
+  manifest: "/manifest.webmanifest",
+};
+
+/**
+ * themeColor tidak bisa lewat kelas Tailwind (metadata peramban), jadi nilainya
+ * ditulis di sini dan WAJIB sama dengan token `brand` di docs/design.md §4.
+ * Jangan menyalin hex ini ke komponen mana pun.
+ */
+export const viewport: Viewport = {
+  themeColor: "#0969DA",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -28,9 +43,13 @@ export default function RootLayout({
   return (
     <html lang="id" className={inter.variable}>
       <body>
-        <AuthProvider>
-          <QueryProvider>{children}</QueryProvider>
-        </AuthProvider>
+        <PwaRegister />
+        {/* Toast di paling luar supaya halaman login pun bisa memberi umpan balik. */}
+        <ToastProvider>
+          <AuthProvider>
+            <QueryProvider>{children}</QueryProvider>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );

@@ -1,12 +1,20 @@
 "use client";
 
+import { useMemo } from "react";
 import { KPICard } from "@/components/kpi/kpi-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
+import { MetricStrip } from "@/components/ui/metric-strip";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { useKpi } from "@/hooks/use-data";
-import { KPI_DEFINITIONS, kpiTrend } from "@/lib/kpi";
-import { formatDateTime, formatKg } from "@/lib/format";
+import { useAuth } from "@/contexts/auth";
+import { scopeForRole } from "@/lib/role";
+import {
+  KPI_DEFINITIONS,
+  kpiTrend,
+  trendIsImprovement,
+} from "@/lib/kpi";
+import { formatDateTime, formatKg, formatRupiah } from "@/lib/format";
 
 /**
  * KPI Dashboard (design.md §3.6): 7 KPI card, tiap card = angka besar + trend
@@ -18,6 +26,28 @@ import { formatDateTime, formatKg } from "@/lib/format";
 export default function KpiPage() {
   const { data: kpi, error, isPending, isFetching, refetch, dataUpdatedAt } =
     useKpi();
+  const { role, region, locationId } = useAuth();
+  const scope = scopeForRole(role, { region, locationId });
+
+  /** Hitungan arah trend — diturunkan dari data, bukan angka terpisah. */
+  const trends = useMemo(() => {
+    if (!kpi) return { improved: 0, worsened: 0, flat: 0 };
+    let improved = 0;
+    let worsened = 0;
+    let flat = 0;
+    for (const definition of KPI_DEFINITIONS) {
+      const verdict = trendIsImprovement(
+        definition,
+        kpiTrend(kpi[definition.key], kpi.previous?.[definition.key] ?? null),
+      );
+      if (verdict === true) improved += 1;
+      else if (verdict === false) worsened += 1;
+      else flat += 1;
+    }
+    return { improved, worsened, flat };
+  }, [kpi]);
+
+  const { improved, worsened, flat } = trends;
 
   return (
     <div className="flex flex-col gap-6">
@@ -27,6 +57,11 @@ export default function KpiPage() {
           <p className="text-muted-foreground">
             Tujuh indikator kontinuitas pangan institusional (definisi di
             docs/Skill.md §4). Trend dibandingkan dengan periode sebelumnya.
+          </p>
+          <p className="text-muted-foreground">
+            {scope.kind === "all"
+              ? "Cakupan angka: global (semua wilayah)."
+              : "Catatan jujur untuk demo: angka KPI ini dihitung global di backend, belum ada pemecahan per wilayah — jadi ini BUKAN angka wilayah Anda saja."}
           </p>
         </div>
         {dataUpdatedAt > 0 && (
@@ -53,6 +88,30 @@ export default function KpiPage() {
         </div>
       ) : (
         <>
+          <MetricStrip
+            className="animate-fade-up"
+            items={[
+              {
+                label: "Periode berjalan",
+                value: `${improved} / ${KPI_DEFINITIONS.length}`,
+                hint: "KPI membaik vs periode sebelumnya",
+                tone: improved > 0 ? "safe" : "neutral",
+              },
+              {
+                label: "Perlu perhatian",
+                value: String(worsened),
+                hint: "KPI memburuk vs periode sebelumnya",
+                tone: worsened > 0 ? "warning" : "safe",
+              },
+              {
+                label: "Tanpa histori",
+                value: String(flat),
+                hint: "belum ada pembanding — tidak dikarang",
+                tone: "neutral",
+              },
+            ]}
+          />
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {KPI_DEFINITIONS.map((definition) => {
               const previous = kpi.previous?.[definition.key];
@@ -68,19 +127,15 @@ export default function KpiPage() {
           </div>
 
           {kpi.avoidableFoodLossRp > 0 && (
-            <Card>
-              <CardContent className="py-3">
+            <Card className="animate-fade-up border-l-4 border-l-status-safe">
+              <CardContent className="flex flex-wrap items-baseline gap-x-2 py-3">
                 <span className="font-medium text-navy-900">
-                  Nilai ekonomi food loss yang dihindari:{" "}
+                  Nilai ekonomi food loss yang dihindari:
                 </span>
-                <span>
-                  {new Intl.NumberFormat("id-ID", {
-                    style: "currency",
-                    currency: "IDR",
-                    maximumFractionDigits: 0,
-                  }).format(kpi.avoidableFoodLossRp)}
+                <span className="text-lg font-semibold tabular-nums text-navy-900">
+                  {formatRupiah(kpi.avoidableFoodLossRp)}
                 </span>
-                <span className="ml-2 text-muted-foreground">
+                <span className="text-muted-foreground">
                   ({formatKg(kpi.avoidableFoodLossKg)} setara)
                 </span>
               </CardContent>
