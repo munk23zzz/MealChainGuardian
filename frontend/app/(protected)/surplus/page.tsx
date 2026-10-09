@@ -38,8 +38,6 @@ export default function SurplusPage() {
           <p className="text-muted-foreground">
             Sisa pangan yang masih dalam jendela aman 4 jam saat tiba boleh
             dialihkan ke penerima lain; sisanya wajib dicatat penanganannya.
-            Dasar hukum: Peraturan BGN No. 1 Tahun 2026 tentang penanganan sisa
-            pangan, sampah, dan limbah.
           </p>
         </div>
         <DataSourceBadge />

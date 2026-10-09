@@ -225,9 +225,6 @@ export function SurplusPanel({ now }: { now: number }) {
 
         <div className="rounded-md bg-navy-100 p-3 text-sm">
           <p className="font-medium text-navy-900">{plan.wasteNote}</p>
-          <p className="mt-1 text-muted-foreground">
-            Dasar hukum: {WASTE_LAW} (penanganan sisa pangan, sampah, dan limbah).
-          </p>
         </div>
       </CardContent>
     </Card>
