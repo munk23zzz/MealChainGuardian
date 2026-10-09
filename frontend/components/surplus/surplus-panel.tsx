@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Download, Recycle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Card,
   CardContent,
@@ -17,6 +18,7 @@ import {
   MOCK_BATCHES,
   MOCK_SURPLUS_TARGETS,
   fromOffset,
+  type MockBatch,
 } from "@/lib/mock-compliance";
 import { planSurplus, TARGET_KIND_LABELS } from "@/lib/surplus";
 
@@ -55,12 +57,35 @@ function downloadCsv(fileName: string, content: string) {
  * Panel surplus pangan. Alokasi dihitung planSurplus (lib/surplus.ts): surplus
  * hanya boleh dialihkan bila MASIH di dalam jendela aman 4 jam saat tiba.
  */
-export function SurplusPanel({ now }: { now: number }) {
-  const [batchId, setBatchId] = useState(MOCK_BATCHES[0].id);
+export function SurplusPanel({
+  now,
+  batches = MOCK_BATCHES,
+}: {
+  now: number;
+  /**
+   * Batch yang boleh dipilih. Halaman mengirim batch yang SUDAH disaring cakupan peran
+   * (`lib/region-map.ts`); bawaannya data mock penuh supaya komponen tetap bisa dipakai
+   * sendiri (mis. di test/demo).
+   */
+  batches?: MockBatch[];
+}) {
+  const [batchId, setBatchId] = useState(batches[0]?.id ?? "");
   const [portions, setPortions] = useState(150);
 
-  const batch =
-    MOCK_BATCHES.find((item) => item.id === batchId) ?? MOCK_BATCHES[0];
+  const batch = batches.find((item) => item.id === batchId) ?? batches[0];
+
+  /**
+   * Tidak ada batch di cakupan peran (mis. kepala SPPG wilayah yang belum punya batch
+   * demo) → jelaskan, jangan hitung rencana dari batch wilayah lain atau batch kosong.
+   */
+  if (!batch) {
+    return (
+      <EmptyState
+        title="Belum ada batch di wilayah Anda"
+        description="Rencana alokasi sisa pangan hanya bisa disusun untuk batch yang berada di cakupan peran Anda. Batch wilayah lain tidak ditampilkan di sini."
+      />
+    );
+  }
 
   const plan = planSurplus({
     surplusPortions: portions,
@@ -108,7 +133,7 @@ export function SurplusPanel({ now }: { now: number }) {
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-navy-900">Batch:</span>
-            {MOCK_BATCHES.map((item) => (
+            {batches.map((item) => (
               <Button
                 key={item.id}
                 variant={item.id === batch.id ? "default" : "outline"}

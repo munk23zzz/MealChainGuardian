@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   decisionTouchesScope,
   isLocationInScope,
+  isRegionInScope,
   partitionByScope,
   scopeDescription,
   scopeLabel,
@@ -38,6 +39,24 @@ const decision = (over: Partial<Recommendation> = {}): Recommendation =>
     createdAt: "2026-10-07T00:00:00.000Z",
     ...over,
   }) as Recommendation;
+
+describe("isRegionInScope", () => {
+  it("monitor melihat semua wilayah, termasuk yang wilayahnya tidak diketahui", () => {
+    expect(isRegionInScope("DKI Jakarta", { kind: "all" })).toBe(true);
+    expect(isRegionInScope(null, { kind: "all" })).toBe(true);
+  });
+
+  it("peran wilayah hanya cocok dengan wilayahnya sendiri", () => {
+    const scope: DataScope = { kind: "region", region: "Jawa Barat" };
+    expect(isRegionInScope("Jawa Barat", scope)).toBe(true);
+    expect(isRegionInScope("DKI Jakarta", scope)).toBe(false);
+  });
+
+  it("gagal-tertutup: wilayah kosong dan cakupan satu lokasi ditolak", () => {
+    expect(isRegionInScope(null, { kind: "region", region: "Jawa Barat" })).toBe(false);
+    expect(isRegionInScope("DKI Jakarta", { kind: "location", locationId: "loc-2" })).toBe(false);
+  });
+});
 
 describe("scopeLabel", () => {
   it("memberi label manusiawi untuk tiap jenis cakupan", () => {

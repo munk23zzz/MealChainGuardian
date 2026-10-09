@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CcpBoard } from "@/components/compliance/ccp-board";
 import { FourHourTimeline } from "@/components/compliance/four-hour-timeline";
 import { HazardMatrix } from "@/components/compliance/hazard-matrix";
 import { SampleBankCard } from "@/components/compliance/sample-bank-card";
+import { ScopeNotice } from "@/components/layout/scope-notice";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +16,7 @@ import {
 import { DataSourceBadge } from "@/components/ui/data-source-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton";
+import { useAuth } from "@/contexts/auth";
 import { BIZ_STEP_LABELS, sortByTime } from "@/lib/epcis";
 import { formatDateTime } from "@/lib/format";
 import {
@@ -23,6 +25,8 @@ import {
   journeyEvents,
   readingsForBatch,
 } from "@/lib/mock-compliance";
+import { partitionBatchesByScope } from "@/lib/region-map";
+import { scopeForRole } from "@/lib/role";
 
 const COMMODITY_KEYWORDS = [
   "Nasi",
@@ -45,10 +49,30 @@ function commoditiesForMenu(menu: string): string[] {
  * Keamanan Pangan: bukti CCP, jendela aman 4 jam, matriks bahaya, bank sampel,
  * dan jejak lot EPCIS untuk batch terpilih. Semua waktu memakai `now` dari
  * useEffect supaya tidak ada mismatch hidrasi.
+ *
+ * Cakupan peran (design.md §1.4): batch yang bisa dipilih dibatasi wilayah peran. Batch
+ * demo hanya menyimpan nama tujuan (bukan `locationId`), jadi pemetaannya lewat
+ * `lib/region-map.ts` yang murni dan teruji — bukan pencocokan teks di komponen ini.
+ * Kepala SPPG DKI Jakarta memang tidak perlu membaca suhu dapur Bogor, dan sebaliknya.
  */
 export default function CompliancePage() {
   const [now, setNow] = useState<number | null>(null);
   const [batchId, setBatchId] = useState(MOCK_BATCHES[0].id);
+  const { role, region, locationId, canApprove } = useAuth();
+  const [showAllScopes, setShowAllScopes] = useState(false);
+
+  const roleScope = useMemo(
+    () => scopeForRole(role, { region, locationId }),
+    [role, region, locationId],
+  );
+  const effectiveScope = useMemo(
+    () => (showAllScopes ? ({ kind: "all" } as const) : roleScope),
+    [showAllScopes, roleScope],
+  );
+  const { inScope: scopedBatches, outOfScope } = useMemo(
+    () => partitionBatchesByScope(MOCK_BATCHES, effectiveScope),
+    [effectiveScope],
+  );
 
   useEffect(() => {
     setNow(Date.now());
@@ -69,15 +93,49 @@ export default function CompliancePage() {
     );
   }
 
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-xl font-semibold text-navy-900">
+          Keamanan Pangan
+        </h1>
+        <p className="text-muted-foreground">
+          Bukti CCP, jendela aman masak → konsumsi, matriks bahaya, bank sampel,
+          dan jejak lot EPCIS untuk batch yang dipilih.
+        </p>
+      </div>
+      <DataSourceBadge />
+    </div>
+  );
+
+  const notice = (
+    <ScopeNotice
+      scope={effectiveScope}
+      outsideCount={outOfScope.length}
+      detail={`${scopedBatches.length} dari ${MOCK_BATCHES.length} batch demo`}
+      readOnly={!canApprove}
+      canToggle={roleScope.kind !== "all"}
+      showingAll={showAllScopes}
+      roleScope={roleScope}
+      onToggle={() => setShowAllScopes((value) => !value)}
+    />
+  );
+
+  // Batch terpilih bisa jatuh di luar cakupan setelah peran/mode berubah: jatuh ke batch
+  // pertama yang MASIH dalam cakupan, bukan tetap menampilkan yang terlarang.
   const batch =
-    MOCK_BATCHES.find((item) => item.id === batchId) ?? MOCK_BATCHES[0];
+    scopedBatches.find((item) => item.id === batchId) ?? scopedBatches[0];
 
   if (!batch) {
     return (
-      <EmptyState
-        title="Belum ada batch"
-        description="Tidak ada batch yang bisa ditampilkan."
-      />
+      <div className="flex flex-col gap-6">
+        {header}
+        {notice}
+        <EmptyState
+          title="Belum ada batch di wilayah Anda"
+          description="Tidak ada batch demo di cakupan peran Anda, jadi tidak ada bukti CCP yang bisa ditampilkan. Batch wilayah lain sengaja tidak dibuka di sini."
+        />
+      </div>
     );
   }
 
@@ -87,22 +145,13 @@ export default function CompliancePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-navy-900">
-            Keamanan Pangan
-          </h1>
-          <p className="text-muted-foreground">
-            Bukti CCP, jendela aman masak → konsumsi, matriks bahaya, bank sampel,
-            dan jejak lot EPCIS untuk batch yang dipilih.
-          </p>
-        </div>
-        <DataSourceBadge />
-      </div>
+      {header}
+
+      {notice}
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-navy-900">Batch:</span>
-        {MOCK_BATCHES.map((item) => (
+        {scopedBatches.map((item) => (
           <Button
             key={item.id}
             variant={item.id === batch.id ? "default" : "outline"}

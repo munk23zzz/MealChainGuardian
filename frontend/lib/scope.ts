@@ -79,3 +79,21 @@ export function scopeDescription(
   if (outOfScopeCount <= 0) return base;
   return `${base} · ${outOfScopeCount} di luar ${noun} Anda`;
 }
+
+/**
+ * Cocokkan NAMA WILAYAH dengan cakupan peran — untuk data yang hanya menyimpan wilayah,
+ * bukan `locationId` (mis. batch mock yang tujuannya nama sekolah, `lib/region-map.ts`).
+ *
+ * Gagal-tertutup seperti penyaring lain: wilayah yang tidak diketahui JANGAN ditampilkan,
+ * dan cakupan satu lokasi tidak pernah cocok dengan nama wilayah saja — kemiripan wilayah
+ * bukan bukti bahwa itu lokasi milik pengguna.
+ */
+export function isRegionInScope(
+  region: string | null | undefined,
+  scope: DataScope,
+): boolean {
+  if (scope.kind === "all") return true;
+  if (!region) return false;
+  if (scope.kind === "region") return region === scope.region;
+  return false;
+}

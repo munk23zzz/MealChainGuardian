@@ -197,6 +197,12 @@ export default function SuppliersPage() {
             ? "Cakupan Anda: semua wilayah."
             : `Cakupan Anda: ${scopeLabel(roleScope)} — hanya pemasok lokasi di wilayah itu yang ditampilkan.`}
         </p>
+        {!userCanApprove && (
+          <p className="text-muted-foreground">
+            Peran Anda read-only: usulan eksklusi diajukan Kepala/Ahli Gizi SPPG,
+            dan penelusurannya lewat tombol Detail di tiap pemasok.
+          </p>
+        )}
       </div>
 
       <MetricStrip items={[...metrics]} className="animate-fade-up" />
