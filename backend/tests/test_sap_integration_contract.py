@@ -59,10 +59,6 @@ BUSINESS_PARTNER_CONTRACT_FIELDS = {
 
 # --- angka baku demo, docs/Skill.md §11 --------------------------------------------------
 
-SEED_STOCK = {
-    ("CJ01", "TELUR-01"): Decimal("1400.00"),  # Cianjur, surplus 900 kg
-    ("JK01", "TELUR-01"): Decimal("300.00"),  # Jakarta, shortage 700 kg
-}
 SUPPLIER_NAMES = {"Supplier A", "Supplier B", "Supplier C"}
 
 
@@ -163,16 +159,30 @@ def test_data_source_is_labelled(contract_provider):
     assert contract_provider.data_source in (DataSource.MOCK, DataSource.SAP)
 
 
-def test_material_stock_seed_matches_demo_dataset(contract_provider):
-    rows = contract_provider.get_material_stock()
-    assert {(r.Plant, r.MaterialNumber): r.MatlStkQty for r in rows} == SEED_STOCK
-    assert {r.BaseUnit for r in rows} == {"KG"}
-    assert {r.Batch for r in rows} == {"B-2026-0101", "B-2026-0102"}
+# Angka §11 yang TIDAK boleh berubah: Cianjur 1.400 kg (CJ01) dan Jakarta 300 kg (JK01), batch
+# B-2026-0101/0102. Sejak seed diperluas ke 10 titik SPPG + 3 komoditas, assertion-nya berbentuk
+# "baris §11 ada PERSIS", bukan "tabel hanya berisi §11" — jumlah baris memang bertambah, dan itu
+# disengaja (docs/Skill.md §11 tetap jadi angka baku demo).
+DEMO_STOCK_ROWS = {
+    "B-2026-0101": ("CJ01", "TELUR-01", Decimal("1400.00")),
+    "B-2026-0102": ("JK01", "TELUR-01", Decimal("300.00")),
+}
+
+
+def test_material_stock_seed_contains_the_documented_demo_dataset(contract_provider):
+    rows = {r.Batch: r for r in contract_provider.get_material_stock()}
+
+    for batch, expected in DEMO_STOCK_ROWS.items():
+        assert batch in rows, f"batch {batch} (docs/Skill.md §11) hilang dari seed SAP mock"
+        row = rows[batch]
+        assert (row.Plant, row.MaterialNumber, row.MatlStkQty) == expected
+
+    assert {r.BaseUnit for r in rows.values()} == {"KG"}
 
 
 def test_material_stock_filters(contract_provider):
-    assert [r.Plant for r in contract_provider.get_material_stock(plant="CJ01")] == ["CJ01"]
-    assert len(contract_provider.get_material_stock(material_number="TELUR-01")) == 2
+    assert {r.Plant for r in contract_provider.get_material_stock(plant="CJ01")} == {"CJ01"}
+    assert contract_provider.get_material_stock(material_number="TELUR-01")
     assert len(contract_provider.get_material_stock(batch="B-2026-0102")) == 1
     assert contract_provider.get_material_stock(plant="TIDAK-ADA") == []
     assert contract_provider.get_material_stock(material_number="Beras") == []

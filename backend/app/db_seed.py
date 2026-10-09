@@ -10,7 +10,7 @@ Idempoten: data master dicocokkan berdasarkan nama/kode, tabel mock ditulis ulan
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -33,7 +33,8 @@ from app.sap_integration.field_mapping import (
     MATERIAL_NUMBER_BY_COMMODITY,
     PLANT_CODE_BY_LOCATION,
 )
-from app.sap_integration.mock_provider import InMemorySapMockStore, MockSAPProvider
+from app.sap_integration.mock_provider import MockSAPProvider
+from app.sap_integration.sql_mock_store import SqlSapMockStore
 
 # --- master data (docs/Skill.md §11: Cianjur surplus, Jakarta shortage) ------------------
 
@@ -52,9 +53,74 @@ LOCATIONS = (
         "longitude": Decimal("106.845600"),
         "role_hint": "demand_hub",
     },
+    # --- 8 titik tambahan dari dataset mock UI (`frontend/lib/mock-data.ts`) ----------------
+    # Ditambahkan supaya mode nyata tampil sekaya mode demo. Angka §11 (Cianjur/Jakarta) tidak
+    # diubah; identitasnya pun tetap kota, bukan SPPG, karena narasi Event 1 memakai keduanya.
+    # "SPPG Jakarta Pusat" di mock TIDAK diambil: titik "Jakarta" di atas sudah mewakili pusat,
+    # dan menambahkan keduanya berarti menghitung kebutuhan Jakarta dua kali.
+    {
+        "name": "SPPG Jakarta Utara",
+        "region": "West",
+        "latitude": Decimal("-6.121800"),
+        "longitude": Decimal("106.900000"),
+        "role_hint": "demand_hub",
+    },
+    {
+        "name": "SPPG Jakarta Barat",
+        "region": "West",
+        "latitude": Decimal("-6.167500"),
+        "longitude": Decimal("106.763000"),
+        "role_hint": "demand_hub",
+    },
+    {
+        "name": "SPPG Jakarta Selatan",
+        "region": "West",
+        "latitude": Decimal("-6.261500"),
+        "longitude": Decimal("106.810600"),
+        "role_hint": "demand_hub",
+    },
+    {
+        "name": "SPPG Jakarta Timur",
+        "region": "West",
+        "latitude": Decimal("-6.225000"),
+        "longitude": Decimal("106.900400"),
+        "role_hint": "demand_hub",
+    },
+    {
+        "name": "SPPG Bogor",
+        "region": "West",
+        "latitude": Decimal("-6.597100"),
+        "longitude": Decimal("106.806000"),
+        "role_hint": "mixed",
+    },
+    {
+        "name": "SPPG Depok",
+        "region": "West",
+        "latitude": Decimal("-6.402500"),
+        "longitude": Decimal("106.794200"),
+        "role_hint": "mixed",
+    },
+    {
+        "name": "SPPG Tangerang",
+        "region": "West",
+        "latitude": Decimal("-6.178300"),
+        "longitude": Decimal("106.631900"),
+        "role_hint": "mixed",
+    },
+    {
+        "name": "SPPG Bekasi",
+        "region": "West",
+        "latitude": Decimal("-6.238300"),
+        "longitude": Decimal("106.975600"),
+        "role_hint": "mixed",
+    },
 )
 
-COMMODITIES = ({"name": "telur", "unit": "kg"},)
+COMMODITIES = (
+    {"name": "telur", "unit": "kg"},
+    {"name": "ayam", "unit": "kg"},
+    {"name": "wortel", "unit": "kg"},
+)
 
 # Pemasok fiktif (tidak menyerupai perusahaan/orang nyata). reliability_score memakai default
 # Schema.md (0.80); angka berbeda menyusul bersama alur LEARN (Skill.md §10).
@@ -64,36 +130,116 @@ SUPPLIERS = (
     {"name": "Supplier C", "location": "Jakarta", "reliability_score": Decimal("0.80")},
 )
 
-# Baris stok mock SAP = angka baku demo (docs/Skill.md §11).
-MATERIAL_STOCK_ROWS = (
-    {"location": "Cianjur", "batch": "B-2026-0101", "quantity": Decimal("1400.00")},
-    {"location": "Jakarta", "batch": "B-2026-0102", "quantity": Decimal("300.00")},
+# Baris pasokan demo — satu baris = satu pasangan (lokasi, komoditas).
+#
+# Angka baku docs/Skill.md §11 (Cianjur 1.400/500 kg, Jakarta 300/1.000 kg) tetap utuh; delapan titik
+# SPPG lain diambil dari dataset mock UI (`frontend/lib/mock-data.ts`) supaya mode nyata tampil sekaya
+# mode demo. `batch_count` hanya MEMECAH jumlah itu jadi beberapa batch (mengikuti angka mock), bukan
+# menambah stok.
+#
+# `safety`/`freshness_hours`/`temperature_c` menerjemahkan kolom mock (safetyStatus, freshnessStatus,
+# temperatureExcursion) ke atribut batch:
+#   pass + 72 jam             → batch segar
+#   needs_verification + 12 h  → batch perlu verifikasi + kesegaran menipis + suhu menyimpang
+#   pass + 12 jam              → kesegaran menipis (kuning)
+#   fail + freshness_hours < 0 → gagal aman: batch sudah lewat usable_until dan stoknya TIDAK dihitung
+#                                (Schema.md §6), tapi justru itu yang membuatnya merah di peta
+# `temperature_c` di atas 4 °C = penyimpangan rantai dingin (`frontend/lib/ccp.ts`, rule `chilled`).
+#
+# CATATAN: `SapMockMaterialStock` in-memory (`InMemorySapMockStore`) masih memakai angka §11 saja —
+# ia fixture kontrak layer SAP. Store Postgres (mode yang dijalankan demo) memakai tabel di sini.
+SUPPLY_ROWS = (
+    # §11 — batch-nya sengaja SATU per titik supaya kode batch B-2026-0101/0102 (dipakai contract
+    # test SAP) tidak berubah.
+    {"location": "Cianjur", "commodity": "telur", "quantity": Decimal("1400.00"), "batch_count": 1,
+     "price_per_kg": Decimal("26500.00"), "safety": "pass", "freshness_hours": 72,
+     "temperature_c": None},
+    {"location": "Jakarta", "commodity": "telur", "quantity": Decimal("300.00"), "batch_count": 1,
+     "price_per_kg": Decimal("26500.00"), "safety": "pass", "freshness_hours": 72,
+     "temperature_c": None},
+    # --- 8 titik dari mock UI ---
+    {"location": "SPPG Jakarta Utara", "commodity": "telur", "quantity": Decimal("280.00"),
+     "batch_count": 2, "price_per_kg": Decimal("30000.00"), "safety": "needs_verification",
+     "freshness_hours": 12, "temperature_c": Decimal("12.5")},
+    {"location": "SPPG Jakarta Utara", "commodity": "ayam", "quantity": Decimal("180.00"),
+     "batch_count": 1, "price_per_kg": Decimal("37000.00"), "safety": "pass",
+     "freshness_hours": 12, "temperature_c": None},
+    {"location": "SPPG Jakarta Utara", "commodity": "wortel", "quantity": Decimal("140.00"),
+     "batch_count": 2, "price_per_kg": Decimal("13000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Jakarta Barat", "commodity": "telur", "quantity": Decimal("880.00"),
+     "batch_count": 4, "price_per_kg": Decimal("27500.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Jakarta Barat", "commodity": "ayam", "quantity": Decimal("600.00"),
+     "batch_count": 3, "price_per_kg": Decimal("34500.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Jakarta Selatan", "commodity": "ayam", "quantity": Decimal("50.00"),
+     "batch_count": 1, "price_per_kg": Decimal("40000.00"), "safety": "fail",
+     "freshness_hours": -6, "temperature_c": None},
+    {"location": "SPPG Jakarta Timur", "commodity": "wortel", "quantity": Decimal("680.00"),
+     "batch_count": 3, "price_per_kg": Decimal("11500.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Bogor", "commodity": "telur", "quantity": Decimal("380.00"),
+     "batch_count": 2, "price_per_kg": Decimal("29000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Bogor", "commodity": "wortel", "quantity": Decimal("110.00"),
+     "batch_count": 1, "price_per_kg": Decimal("14000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Depok", "commodity": "telur", "quantity": Decimal("600.00"),
+     "batch_count": 3, "price_per_kg": Decimal("27500.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Depok", "commodity": "wortel", "quantity": Decimal("520.00"),
+     "batch_count": 2, "price_per_kg": Decimal("11000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Tangerang", "commodity": "ayam", "quantity": Decimal("430.00"),
+     "batch_count": 2, "price_per_kg": Decimal("35000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Tangerang", "commodity": "telur", "quantity": Decimal("285.00"),
+     "batch_count": 2, "price_per_kg": Decimal("29500.00"), "safety": "pass",
+     "freshness_hours": 12, "temperature_c": None},
+    {"location": "SPPG Bekasi", "commodity": "telur", "quantity": Decimal("240.00"),
+     "batch_count": 2, "price_per_kg": Decimal("31000.00"), "safety": "pass",
+     "freshness_hours": 72, "temperature_c": None},
+    {"location": "SPPG Bekasi", "commodity": "ayam", "quantity": Decimal("170.00"),
+     "batch_count": 1, "price_per_kg": Decimal("36500.00"), "safety": "pass",
+     "freshness_hours": 12, "temperature_c": None},
 )
 
-# Demand, harga, dan atribut batch domain — angka baku docs/Skill.md §11 (demand 500/1000 kg,
-# referensi harga 26.500 Rp/kg). Nilai `batches` yang tidak ada di §11 (kesegaran, suhu, sertifikasi)
-# adalah placeholder demo dan WAJIB ikut ditandai sebagai data simulasi di UI (lihat deviasi #18).
+# Demand per (lokasi, komoditas). §11 untuk Cianjur/Jakarta, sisanya dari mock UI. Titik yang tidak
+# punya baris di sini dianggap tidak punya kebutuhan — bukan kebutuhan nol yang dikarang.
 DEMAND_ROWS = (
-    {"location": "Cianjur", "quantity": Decimal("500.00"), "days_ahead": 3},
-    {"location": "Jakarta", "quantity": Decimal("1000.00"), "days_ahead": 3},
+    {"location": "Cianjur", "commodity": "telur", "quantity": Decimal("500.00"), "days_ahead": 3},
+    {"location": "Jakarta", "commodity": "telur", "quantity": Decimal("1000.00"), "days_ahead": 3},
+    {"location": "SPPG Jakarta Utara", "commodity": "telur", "quantity": Decimal("500.00"),
+     "days_ahead": 3},
+    {"location": "SPPG Jakarta Utara", "commodity": "ayam", "quantity": Decimal("300.00"),
+     "days_ahead": 3},
+    {"location": "SPPG Jakarta Selatan", "commodity": "ayam", "quantity": Decimal("400.00"),
+     "days_ahead": 3},
+    {"location": "SPPG Jakarta Timur", "commodity": "wortel", "quantity": Decimal("500.00"),
+     "days_ahead": 3},
+    {"location": "SPPG Bogor", "commodity": "wortel", "quantity": Decimal("250.00"), "days_ahead": 3},
+    {"location": "SPPG Depok", "commodity": "telur", "quantity": Decimal("700.00"), "days_ahead": 3},
+    {"location": "SPPG Tangerang", "commodity": "telur", "quantity": Decimal("420.00"),
+     "days_ahead": 3},
+    {"location": "SPPG Bekasi", "commodity": "telur", "quantity": Decimal("400.00"), "days_ahead": 3},
+    {"location": "SPPG Bekasi", "commodity": "ayam", "quantity": Decimal("420.00"), "days_ahead": 3},
 )
+
+# Harga referensi telur (docs/Skill.md §11) — sinyal harga di titik baku demo.
 REFERENCE_PRICE_PER_KG = Decimal("26500.00")
-BATCH_ATTRIBUTES = {
-    "B-2026-0101": {
-        "harvested_days_ago": 2,
-        "freshness_score": Decimal("0.95"),
-        "safety_status": "pass",
-        "usable_in_days": 3,
-        "certification_status": "certified",
-    },
-    "B-2026-0102": {
-        "harvested_days_ago": 2,
-        "freshness_score": Decimal("0.92"),
-        "safety_status": "pass",
-        "usable_in_days": 3,
-        "certification_status": "certified",
-    },
-}
+
+# Kode batch: B-2026-0101, 0102, … (0101/0102 = angka §11). Nomor urut mengikuti SUPPLY_ROWS.
+BATCH_CODE_PREFIX = "B-2026-"
+FIRST_BATCH_NUMBER = 101
+
+# Atribut batch yang tidak ada di §11 (kesegaran, suhu, sertifikasi) adalah placeholder demo dan
+# WAJIB tetap ditandai sebagai data simulasi di UI (lihat deviasi #18).
+BATCH_CERTIFICATION = "hygiene"
+BATCH_FRESHNESS_SCORE = Decimal("0.95")
+BATCH_HARVESTED_DAYS_AGO = 2
+# Suhu normal batch segar yang disimpan dingin (< 4 °C, `frontend/lib/ccp.ts`).
+BATCH_BASE_TEMPERATURE_C = Decimal("2.0")
 
 # Akun demo (docs/Skill.md §9: 6 akun — head + nutritionist Jakarta & Cianjur, 2 monitor BGN).
 #
@@ -149,6 +295,48 @@ DEMO_PASSWORD_BY_ROLE = {
 def demo_password_hash(role: str) -> str:
     """Hash password demo untuk satu peran (dipakai seed)."""
     return hash_password(DEMO_PASSWORD_BY_ROLE[role])
+
+
+def _split_quantity(total: Decimal, count: int) -> list[Decimal]:
+    """Bagi satu jumlah menjadi `count` batch; selisih pembulatan ditaruh di batch terakhir.
+
+    Jumlah batch TIDAK boleh menambah atau mengurangi stok: total hasilnya harus sama dengan `total`.
+    Itu sebabnya sisanya tidak dibuang, dan dikunci test.
+    """
+    if count < 1:
+        raise ValueError(f"batch_count minimal 1, dapat {count}")
+
+    share = (total / count).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    quantities = [share] * (count - 1)
+    quantities.append(total - share * (count - 1))
+    return quantities
+
+
+def _temperature_log(now: datetime, excursion_c: Decimal | None) -> list[dict[str, object]]:
+    """Log suhu batch: satu bacaan normal, plus bacaan menyimpang bila barisnya memang menyimpang.
+
+    Dua bacaan (bukan hanya yang menyimpang) supaya log-nya terbaca seperti riwayat sensor biasa —
+    dan supaya ambang di `app/core/location_status.py` benar-benar diuji oleh data seed, bukan hanya
+    oleh nilai buatan test.
+    """
+    log: list[dict[str, object]] = [
+        {
+            "timestamp": (now - timedelta(hours=2)).isoformat(),
+            "celsius": float(BATCH_BASE_TEMPERATURE_C),
+        }
+    ]
+    if excursion_c is not None:
+        log.append({"timestamp": (now - timedelta(hours=1)).isoformat(), "celsius": float(excursion_c)})
+    return log
+
+
+def _freshness_score(freshness_hours: int) -> Decimal:
+    """Skor kesegaran demo mengikuti sisa masa simpan (placeholder, bukan hasil `/freshness/evaluate`)."""
+    if freshness_hours < 0:
+        return Decimal("0.30")
+    if freshness_hours < 48:
+        return Decimal("0.70")
+    return BATCH_FRESHNESS_SCORE
 
 
 def seed_demo_data(session: Session) -> dict[str, int]:
@@ -215,32 +403,67 @@ def seed_demo_data(session: Session) -> dict[str, int]:
             # demo akan selalu gagal tanpa baris ini.
             existing.password_hash = demo_password_hash(spec["role"])
 
-    # Tabel mock SAP ditulis ulang supaya angka demo selalu sama.
+    # Batch + tabel mock SAP dibangun dari SATU daftar (SUPPLY_ROWS) supaya jumlah dan isinya tidak
+    # bisa berbeda: `batches` = unit domain (kesegaran/keamanan/stok terpakai), baris SAP = bentuk
+    # sumbernya. Sebelumnya keduanya ditulis dari daftar terpisah. (Tidak ada kolom yang menautkan
+    # keduanya — Schema.md §2 tidak mendefinisikannya — jadi kesamaan yang dijamin adalah jumlah baris
+    # per pasangan, dikunci test di tests/test_demo_dataset.py.)
     session.execute(delete(SapMockMaterialStock))
-    material = MATERIAL_NUMBER_BY_COMMODITY["telur"]
-    for spec in MATERIAL_STOCK_ROWS:
-        session.add(
-            SapMockMaterialStock(
-                material_number=material,
-                plant=PLANT_CODE_BY_LOCATION[spec["location"]],
-                storage_location=DEFAULT_STORAGE_LOCATION,
-                batch=spec["batch"],
-                quantity=spec["quantity"],
-                unit="KG",
+    session.execute(delete(Batch))
+    now = datetime.now(timezone.utc)
+    supplier_ids = {row.name: row.id for row in session.scalars(select(Supplier)).all()}
+    # Empat titik pertama memakai pemasok §11 apa adanya; titik tambahan memakai Supplier B
+    # (menambah pemasok baru berarti mengubah Skill.md §11 — keputusan dokumen, bukan implementasi).
+    supplier_by_location = {
+        "Cianjur": "Supplier A",
+        "Jakarta": "Supplier C",
+    }
+
+    batch_number = FIRST_BATCH_NUMBER
+    batches_written = 0
+    for spec in SUPPLY_ROWS:
+        plant = PLANT_CODE_BY_LOCATION[spec["location"]]
+        material = MATERIAL_NUMBER_BY_COMMODITY[spec["commodity"]]
+        supplier_name = supplier_by_location.get(spec["location"], "Supplier B")
+        for quantity in _split_quantity(spec["quantity"], spec["batch_count"]):
+            code = f"{BATCH_CODE_PREFIX}{batch_number:04d}"
+            batch_number += 1
+            batches_written += 1
+
+            session.add(
+                SapMockMaterialStock(
+                    material_number=material,
+                    plant=plant,
+                    storage_location=DEFAULT_STORAGE_LOCATION,
+                    batch=code,
+                    quantity=quantity,
+                    unit="KG",
+                )
             )
-        )
+            session.add(
+                Batch(
+                    commodity_id=commodity_ids[spec["commodity"]],  # type: ignore[arg-type]
+                    location_id=location_ids[spec["location"]],  # type: ignore[arg-type]
+                    supplier_id=supplier_ids[supplier_name],
+                    quantity_kg=quantity,
+                    harvested_at=now - timedelta(days=BATCH_HARVESTED_DAYS_AGO),
+                    temperature_log=_temperature_log(now, spec["temperature_c"]),
+                    certification_status=BATCH_CERTIFICATION,
+                    freshness_score=_freshness_score(spec["freshness_hours"]),
+                    safety_status=spec["safety"],
+                    usable_until=now + timedelta(hours=spec["freshness_hours"]),
+                )
+            )
 
     session.flush()
 
-    # Demand + harga domain (angka baku docs/Skill.md §11). Ditulis ulang tiap seed supaya demo
-    # selalu mulai dari angka yang sama.
+    # Demand + harga domain. Ditulis ulang tiap seed supaya demo selalu mulai dari angka yang sama.
     session.execute(delete(DemandRecord))
     for spec in DEMAND_ROWS:
-        now = datetime.now(timezone.utc)
         session.add(
             DemandRecord(
                 location_id=location_ids[spec["location"]],  # type: ignore[arg-type]
-                commodity_id=commodity_ids["telur"],  # type: ignore[arg-type]
+                commodity_id=commodity_ids[spec["commodity"]],  # type: ignore[arg-type]
                 quantity_kg=spec["quantity"],
                 needed_by=now + timedelta(days=spec["days_ahead"]),
                 recorded_at=now,
@@ -248,59 +471,38 @@ def seed_demo_data(session: Session) -> dict[str, int]:
         )
 
     session.execute(delete(PriceSignal))
-    now = datetime.now(timezone.utc)
-    for spec in LOCATIONS:
+    for spec in SUPPLY_ROWS:
         session.add(
             PriceSignal(
-                location_id=location_ids[spec["name"]],  # type: ignore[arg-type]
-                commodity_id=commodity_ids["telur"],  # type: ignore[arg-type]
-                price_per_kg=REFERENCE_PRICE_PER_KG,
-                recorded_at=now,
-                source="reference",
-            )
-        )
-
-    # Batch domain: satu batch per baris stok SAP, dengan atribut kesegaran/keamanan demo.
-    session.execute(delete(Batch))
-    supplier_ids = {
-        row.name: row.id for row in session.scalars(select(Supplier)).all()
-    }
-    for spec in MATERIAL_STOCK_ROWS:
-        attributes = BATCH_ATTRIBUTES[spec["batch"]]
-        session.add(
-            Batch(
-                commodity_id=commodity_ids["telur"],  # type: ignore[arg-type]
                 location_id=location_ids[spec["location"]],  # type: ignore[arg-type]
-                supplier_id=(
-                    supplier_ids["Supplier A"]
-                    if spec["location"] == "Cianjur"
-                    else supplier_ids["Supplier C"]
+                commodity_id=commodity_ids[spec["commodity"]],  # type: ignore[arg-type]
+                price_per_kg=spec["price_per_kg"],
+                recorded_at=now,
+                # §11 menetapkan satu harga referensi pasar untuk telur; harga titik tambahan
+                # adalah kuotasi lokal, jadi sumbernya dibedakan (Schema.md §2 `price_signals.source`).
+                source=(
+                    "pihps_reference"
+                    if spec["price_per_kg"] == REFERENCE_PRICE_PER_KG
+                    else "supplier_quote"
                 ),
-                quantity_kg=spec["quantity"],
-                harvested_at=now - timedelta(days=attributes["harvested_days_ago"]),
-                temperature_log=[],
-                certification_status=attributes["certification_status"],
-                freshness_score=attributes["freshness_score"],
-                safety_status=attributes["safety_status"],
-                usable_until=now + timedelta(days=attributes["usable_in_days"]),
             )
         )
 
     session.flush()
 
-    # Tarikan awal: stok SAP -> supply_records domain (source='mock_sap').
-    synced = sync_supply_records(session, MockSAPProvider(store=InMemorySapMockStore()))
+    # Tarikan awal: stok SAP (store Postgres = mode yang dijalankan demo) -> supply_records domain.
+    synced = sync_supply_records(session, MockSAPProvider(store=SqlSapMockStore(session=session)))
 
     return {
         "locations": len(LOCATIONS),
         "commodities": len(COMMODITIES),
         "suppliers": len(SUPPLIERS),
         "users": len(DEMO_USERS),
-        "sap_mock_material_stock": len(MATERIAL_STOCK_ROWS),
+        "sap_mock_material_stock": batches_written,
         "supply_records": synced,
         "demand_records": len(DEMAND_ROWS),
-        "price_signals": len(LOCATIONS),
-        "batches": len(MATERIAL_STOCK_ROWS),
+        "price_signals": len(SUPPLY_ROWS),
+        "batches": batches_written,
     }
 
 

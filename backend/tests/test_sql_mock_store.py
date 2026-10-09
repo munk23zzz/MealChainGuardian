@@ -59,18 +59,30 @@ def _request(
 def test_material_stock_is_read_from_postgres(provider, session):
     rows = provider.get_material_stock()
 
-    assert {(r.Plant, r.Batch): r.MatlStkQty for r in rows} == {
-        ("CJ01", "B-2026-0101"): Decimal("1400.00"),
-        ("JK01", "B-2026-0102"): Decimal("300.00"),
+    # Baris baku §11 tetap jadi jangkar: kalau seed mengubah angka demo, test ini yang berteriak.
+    by_batch = {r.Batch: r for r in rows}
+    assert (by_batch["B-2026-0101"].Plant, by_batch["B-2026-0101"].MatlStkQty) == (
+        "CJ01",
+        Decimal("1400.00"),
+    )
+    assert (by_batch["B-2026-0102"].Plant, by_batch["B-2026-0102"].MatlStkQty) == (
+        "JK01",
+        Decimal("300.00"),
+    )
+
+    # Dan baris yang dibaca provider benar-benar isi tabel, bukan objek Python yang dikarang:
+    # seluruh baris provider harus cocok dengan isi tabel (tau tak bergantung jumlah barisnya).
+    stored = {
+        batch: (material_number, quantity)
+        for batch, material_number, quantity in session.execute(
+            select(
+                SapMockMaterialStock.batch,
+                SapMockMaterialStock.material_number,
+                SapMockMaterialStock.quantity,
+            )
+        ).all()
     }
-    # baris yang sama benar-benar ada di tabel, bukan hanya di objek Python
-    stored = session.execute(
-        select(SapMockMaterialStock.material_number, SapMockMaterialStock.quantity)
-    ).all()
-    assert sorted((m, float(q)) for m, q in stored) == [
-        ("TELUR-01", 300.0),
-        ("TELUR-01", 1400.0),
-    ]
+    assert {r.Batch: (r.MaterialNumber, r.MatlStkQty) for r in rows} == stored
 
 
 def test_purchase_order_is_written_to_postgres(provider, session):
@@ -176,6 +188,16 @@ def test_duplicate_po_number_is_rejected_by_the_database(provider, session):
 def test_seed_ingest_writes_supply_records(provider, session):
     """Seed menjalankan tarikan SAP -> supply_records (source='mock_sap')."""
     rows = session.execute(select(SupplyRecord)).scalars().all()
+    stored = session.execute(
+        select(SapMockMaterialStock.batch, SapMockMaterialStock.quantity)
+    ).all()
 
     assert {row.source for row in rows} == {"mock_sap"}
-    assert sorted(float(row.quantity_kg) for row in rows) == [300.0, 1400.0]
+    # Satu baris stok SAP = satu supply_record, dan totalnya tidak boleh berbeda dari isi tabel mock.
+    assert len(rows) == len(stored)
+    assert sum((row.quantity_kg for row in rows), Decimal("0")) == sum(
+        (quantity for _batch, quantity in stored), Decimal("0")
+    )
+    # Angka §11 tetap ikut terbawa (Cianjur 1.400 kg, Jakarta 300 kg).
+    assert 1400.0 in {float(row.quantity_kg) for row in rows}
+    assert 300.0 in {float(row.quantity_kg) for row in rows}

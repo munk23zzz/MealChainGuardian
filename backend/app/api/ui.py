@@ -6,22 +6,30 @@ Gateway. UI butuh bentuk lain — camelCase + nilai TURUNAN seperti `status` lok
 di sini tidak mengubah kontrak yang sudah ada, jadi integrasi agent tidak ikut berisiko.
 
 Yang dihitung di sini karena hanya backend yang punya datanya (Rules.md: angka tidak dikarang di
-frontend): stok terpakai dari `batches`, kebutuhan terbaru per lokasi, dan status lokasi.
+frontend): stok terpakai dari `batches`, kebutuhan terbaru per lokasi, dan status lokasi (aturannya
+di `app/core/location_status.py`, cermin `frontend/lib/status.ts`).
 """
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.location_status import LocationStatus, location_status
+from app.core.location_status import (
+    FRESHNESS_WARNING_WINDOW,
+    LocationStatus,
+    SupplyCondition,
+    has_temperature_excursion,
+    location_status,
+)
 from app.models import Batch, Commodity, DemandRecord, Location, Supplier
 
 router = APIRouter(tags=["ui"])
@@ -76,20 +84,81 @@ class SupplierOut(BaseModel):
 # --- Turunan dari tabel domain --------------------------------------------------------------
 
 
-def _usable_stock_by_location(session: Session, now: datetime) -> dict[uuid.UUID, Decimal]:
-    """Stok yang masih boleh dipakai per lokasi, dari `batches` (Schema.md §2).
+@dataclass(frozen=True)
+class PairSupply:
+    """Kondisi satu pasangan (lokasi, komoditas) dari batch-nya."""
 
-    Batch `safety_status='fail'` dan batch yang `usable_until`-nya sudah lewat TIDAK dihitung:
-    stok seperti itu tidak boleh menutupi kebutuhan (Schema.md §6 — batch gagal aman tidak pernah
-    jadi kandidat alokasi). Menganggapnya tersedia akan membuat lokasi kekurangan tampak hijau.
+    usable_kg: Decimal
+    has_safety_fail: bool
+    has_needs_verification: bool
+    has_temperature_excursion: bool
+    has_freshness_risk: bool
+
+
+def _supply_by_pair(
+    session: Session, now: datetime
+) -> dict[tuple[uuid.UUID, uuid.UUID], PairSupply]:
+    """Stok terpakai + tanda bahaya per (lokasi, komoditas), dari `batches` (Schema.md §2).
+
+    Aturan yang dipegang di sini:
+    - batch `safety_status='fail'` TIDAK menambah stok terpakai (Schema.md §6: batch gagal aman
+      tidak boleh jadi kandidat alokasi), dan batch yang `usable_until`-nya sudah lewat juga tidak;
+      menganggap keduanya tersedia akan membuat lokasi kekurangan tampak hijau;
+    - tanda bahayanya tetap dihitung walau stoknya dibuang — justru itu yang membuat lokasi
+      bermasalah terlihat di peta;
+    - `usable_until` kosong = freshness belum dievaluasi (`/freshness/evaluate` belum jalan), jadi
+      bukan tanda bahaya.
     """
     rows = session.execute(
-        select(Batch.location_id, func.coalesce(func.sum(Batch.quantity_kg), 0))
-        .where(Batch.safety_status != "fail")
-        .where(or_(Batch.usable_until.is_(None), Batch.usable_until > now))
-        .group_by(Batch.location_id)
+        select(
+            Batch.location_id,
+            Batch.commodity_id,
+            Batch.quantity_kg,
+            Batch.safety_status,
+            Batch.temperature_log,
+            Batch.usable_until,
+        )
     ).all()
-    return {location_id: _decimal(total) for location_id, total in rows}
+
+    freshness_deadline = now + FRESHNESS_WARNING_WINDOW
+    usable: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+    state: dict[tuple[uuid.UUID, uuid.UUID], dict[str, bool]] = {}
+
+    for location_id, commodity_id, quantity_kg, safety_status, temperature_log, usable_until in rows:
+        key = (location_id, commodity_id)
+        usable.setdefault(key, Decimal(0))
+        flags = state.setdefault(
+            key,
+            {
+                "fail": False,
+                "needs_verification": False,
+                "temperature": False,
+                "freshness": False,
+            },
+        )
+        expired = usable_until is not None and usable_until <= now
+
+        if safety_status == "fail":
+            flags["fail"] = True
+        if safety_status == "needs_verification":
+            flags["needs_verification"] = True
+        if has_temperature_excursion(temperature_log):
+            flags["temperature"] = True
+        if expired or (usable_until is not None and usable_until <= freshness_deadline):
+            flags["freshness"] = True
+        if safety_status != "fail" and not expired:
+            usable[key] += _decimal(quantity_kg)
+
+    return {
+        key: PairSupply(
+            usable_kg=usable[key],
+            has_safety_fail=flags["fail"],
+            has_needs_verification=flags["needs_verification"],
+            has_temperature_excursion=flags["temperature"],
+            has_freshness_risk=flags["freshness"],
+        )
+        for key, flags in state.items()
+    }
 
 
 def _latest_demand(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], Decimal]:
@@ -121,11 +190,21 @@ def _latest_demand(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], Decima
 def list_locations(session: SessionDep, _user: CurrentUser) -> list[LocationOut]:
     """Lokasi + statusnya, untuk peta dan daftar di UI."""
     now = _now()
-    usable = _usable_stock_by_location(session, now)
+    supplies = _supply_by_pair(session, now)
+    demand = _latest_demand(session)
 
-    demand_by_location: dict[uuid.UUID, Decimal] = {}
-    for (location_id, _commodity_id), quantity in _latest_demand(session).items():
-        demand_by_location[location_id] = demand_by_location.get(location_id, Decimal(0)) + quantity
+    conditions: dict[uuid.UUID, list[SupplyCondition]] = {}
+    for (location_id, commodity_id), pair in supplies.items():
+        demand_kg = demand.get((location_id, commodity_id), Decimal(0))
+        conditions.setdefault(location_id, []).append(
+            SupplyCondition(
+                has_safety_fail=pair.has_safety_fail,
+                has_temperature_excursion=pair.has_temperature_excursion,
+                has_needs_verification=pair.has_needs_verification,
+                has_deficit=demand_kg > pair.usable_kg,
+                has_freshness_risk=pair.has_freshness_risk,
+            )
+        )
 
     rows = session.scalars(select(Location).order_by(Location.name)).all()
     return [
@@ -136,10 +215,7 @@ def list_locations(session: SessionDep, _user: CurrentUser) -> list[LocationOut]
             latitude=float(row.latitude),
             longitude=float(row.longitude),
             role_hint=row.role_hint,
-            status=location_status(
-                usable_stock_kg=usable.get(row.id, Decimal(0)),
-                demand_kg=demand_by_location.get(row.id, Decimal(0)),
-            ),
+            status=location_status(conditions.get(row.id, [])),
         )
         for row in rows
     ]
@@ -155,14 +231,14 @@ def list_commodities(session: SessionDep, _user: CurrentUser) -> list[CommodityO
 @router.get("/demand", response_model=list[DemandOut])
 def list_demand(session: SessionDep, _user: CurrentUser) -> list[DemandOut]:
     """Kebutuhan per lokasi+komoditas, dengan selisih terhadap stok yang masih boleh dipakai."""
-    now = _now()
-    usable = _usable_stock_by_location(session, now)
+    supplies = _supply_by_pair(session, _now())
 
     out: list[DemandOut] = []
     for (location_id, commodity_id), projected in sorted(
         _latest_demand(session).items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
     ):
-        stock = usable.get(location_id, Decimal(0))
+        pair = supplies.get((location_id, commodity_id))
+        stock = pair.usable_kg if pair is not None else Decimal(0)
         out.append(
             DemandOut(
                 location_id=str(location_id),

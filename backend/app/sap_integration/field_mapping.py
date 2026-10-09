@@ -39,12 +39,26 @@ SAP_ONLY_PURCHASE_ORDER_FIELDS: Final[tuple[str, ...]] = (
 PLANT_CODE_BY_LOCATION: Final[dict[str, str]] = {
     "Cianjur": "CJ01",
     "Jakarta": "JK01",
+    # Delapan titik tambahan (dataset mock UI). Kodenya diikuti pola dua huruf + nomor; hanya
+    # simulasi, tidak ada padanan di S/4HANA mana pun.
+    "SPPG Jakarta Utara": "JU01",
+    "SPPG Jakarta Barat": "JB01",
+    "SPPG Jakarta Selatan": "JS01",
+    "SPPG Jakarta Timur": "JT01",
+    "SPPG Bogor": "BG01",
+    "SPPG Depok": "DP01",
+    "SPPG Tangerang": "TG01",
+    "SPPG Bekasi": "BK01",
 }
 
 # Nama komoditas mengikuti `docs/Schema.md` §1 (`commodities.name`: "telur", huruf kecil) —
 # dokumen adalah kontrak, jadi istilah tampilan pun ikut huruf kecil.
+# URUTAN penting: `mock_provider` mengambil material pertama sebagai telur (fixture §11), jadi
+# "telur" tidak boleh berpindah dari posisi pertama.
 MATERIAL_NUMBER_BY_COMMODITY: Final[dict[str, str]] = {
     "telur": "TELUR-01",
+    "ayam": "AYAM-01",
+    "wortel": "WORTEL-01",
 }
 
 DEFAULT_STORAGE_LOCATION: Final[str] = "SL01"
