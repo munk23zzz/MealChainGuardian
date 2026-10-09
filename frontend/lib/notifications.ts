@@ -35,15 +35,9 @@ export interface NotificationItem {
 // ---------------------------------------------------------------------------
 
 const COMMODITY_LABELS: Record<string, string> = {
-  "com-beras": "Beras",
   "com-telur": "Telur",
   "com-ayam": "Ayam",
-  "com-ikan": "Ikan",
-  "com-tempe": "Tempe",
-  "com-tahu": "Tahu",
   "com-wortel": "Wortel",
-  "com-bayam": "Bayam",
-  "com-pisang": "Pisang",
 };
 
 function commodityLabel(id: string) {

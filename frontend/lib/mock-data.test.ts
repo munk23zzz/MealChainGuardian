@@ -52,13 +52,13 @@ for (const row of MOCK_SUPPLY) {
 
 describe("dataset demo — bentuk", () => {
   it("memiliki cakupan yang cukup lebar untuk demo nasional", () => {
-    // Cakupan dikunci di 10 titik Jabodetabek (keputusan pemilik proyek, 9 Okt): yang tumbuh
-    // adalah keragaman komoditas, bukan jumlah lokasi. Batas bawah tetap dijaga supaya dataset
-    // tidak menyusut diam-diam saat ada yang mengutak-atik berkas ini.
+    // Cakupan mengikuti dokumen ide: 10 titik Jabodetabek x 3 komoditas (telur, ayam, wortel).
+    // Batas bawah tetap dijaga supaya dataset tidak menyusut diam-diam saat ada yang mengubah
+    // berkas ini; kalau cakupan memang diperbesar, ubah angka ini SADAR + perbarui dokumen.
     expect(MOCK_LOCATIONS.length).toBeGreaterThanOrEqual(10);
-    expect(MOCK_COMMODITIES.length).toBeGreaterThanOrEqual(9);
-    expect(MOCK_SUPPLY.length).toBeGreaterThanOrEqual(45);
-    expect(MOCK_DEMAND.length).toBeGreaterThanOrEqual(25);
+    expect(MOCK_COMMODITIES.length).toBeGreaterThanOrEqual(3);
+    expect(MOCK_SUPPLY.length).toBeGreaterThanOrEqual(15);
+    expect(MOCK_DEMAND.length).toBeGreaterThanOrEqual(8);
 
     const provinces = new Set(MOCK_LOCATIONS.map((location) => location.region));
     expect(provinces.size).toBeGreaterThanOrEqual(3);
@@ -186,12 +186,13 @@ describe("dataset demo — status lokasi & narasi", () => {
 
   it("membuat demo tetap punya kasus aman, hampir gagal, dan gagal", () => {
     const statuses = MOCK_SUPPLY.map((row) => row.safetyStatus);
-    // Satu batch gagal (Jakarta Selatan/ayam) dan satu titik suhu menyimpang (Jakarta Utara/telur)
-    // sudah melekat di baris jangkar narasi; yang dijaga di sini hanya "jangan sampai hilang".
+    // Kasus merah dan "menunggu verifikasi" melekat di baris jangkar narasi (Jakarta
+    // Selatan/ayam gagal; Jakarta Utara/telur butuh verifikasi + suhu menyimpang). Yang dijaga
+    // di sini hanya "jangan sampai hilang" — jumlahnya wajar menyusut bersama cakupan.
     expect(statuses.filter((status) => status === "FAIL").length).toBeGreaterThanOrEqual(1);
     expect(
       statuses.filter((status) => status === "NEEDS_VERIFICATION").length,
-    ).toBeGreaterThanOrEqual(2);
+    ).toBeGreaterThanOrEqual(1);
     expect(
       MOCK_SUPPLY.filter((row) => row.temperatureExcursion).length,
     ).toBeGreaterThanOrEqual(1);

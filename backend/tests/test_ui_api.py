@@ -27,21 +27,10 @@ from api_support import (
 
 pytestmark = pytest.mark.usefixtures("client")
 
-# 10 titik Jabodetabek (Cianjur + Jakarta = angka §11, plus 8 SPPG) — sama dengan dataset mock UI,
-# tetapi komoditasnya 9 menu MBG. Cakupan lokasi sengaja dikunci: yang tumbuh adalah komoditas.
+# 10 titik Jabodetabek x 3 komoditas — sama dengan dokumen ide (`docs/PRD.md`, `docs/Schema.md`).
 LOCATION_COUNT = 10
-COMMODITY_NAMES = {
-    "beras",
-    "telur",
-    "ayam",
-    "ikan",
-    "tempe",
-    "tahu",
-    "wortel",
-    "bayam",
-    "pisang",
-}
-SUPPLY_COUNT = 53  # satu baris per (lokasi, komoditas) di SUPPLY_ROWS
+COMMODITY_NAMES = {"telur", "ayam", "wortel"}
+SUPPLY_COUNT = 20  # satu baris per (lokasi, komoditas) di SUPPLY_ROWS
 
 
 def _by_name(rows: list[dict], name: str) -> dict:

@@ -24,17 +24,8 @@ export type Role =
   | "sppg_staff"
   | "dinas_admin";
 
-/** Nama komoditas yang di-scope untuk demo: menu MBG (9 komoditas x 22 titik). */
-export type CommodityName =
-  | "beras"
-  | "telur"
-  | "ayam"
-  | "ikan"
-  | "tempe"
-  | "tahu"
-  | "wortel"
-  | "bayam"
-  | "pisang";
+/** Nama komoditas demo — mengikuti dokumen ide (`docs/Schema.md` §1, `docs/PRD.md`): 3 komoditas. */
+export type CommodityName = "telur" | "ayam" | "wortel";
 
 /**
  * Status satu keputusan/rekomendasi.

@@ -59,14 +59,6 @@ MATERIAL_NUMBER_BY_COMMODITY: Final[dict[str, str]] = {
     "telur": "TELUR-01",
     "ayam": "AYAM-01",
     "wortel": "WORTEL-01",
-    # 6 komoditas menu MBG lain (langkah 2). Urutan tidak penting KECUALI "telur" — entry
-    # PERTAMA dipakai `mock_provider` sebagai fixture §11, jadi telur harus tetap di atas.
-    "beras": "BERAS-01",
-    "ikan": "IKAN-01",
-    "tempe": "TEMPE-01",
-    "tahu": "TAHU-01",
-    "bayam": "BAYAM-01",
-    "pisang": "PISANG-01",
 }
 
 DEFAULT_STORAGE_LOCATION: Final[str] = "SL01"
