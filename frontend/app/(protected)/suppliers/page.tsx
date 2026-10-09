@@ -25,9 +25,15 @@ import { useUrlParam } from "@/hooks/use-url-param";
 import { useAuth } from "@/contexts/auth";
 import { proposeSupplierExclusion } from "@/lib/api";
 import type { Supplier } from "@/lib/api/schema";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatScore } from "@/lib/format";
 import { scopeForRole } from "@/lib/role";
 import { isLocationInScope, scopeLabel } from "@/lib/scope";
+import {
+  RELIABILITY_THRESHOLD,
+  filterSuppliers,
+  isSupplierFilterActive,
+  type SupplierStatusFilter,
+} from "@/lib/supplier-filter";
 import { matchParamToIds } from "@/lib/view-params";
 import { commodityLabel, locationLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -107,6 +113,34 @@ export default function SuppliersPage() {
     );
 
   /**
+   * Penyaring daftar (skill UI/UX untuk dashboard data-padat: "no filtering" anti-pola).
+   * Logikanya di `lib/supplier-filter.ts` yang teruji — halaman hanya menyimpan pilihan.
+   * Penyaring bekerja DI DALAM hasil cakupan peran; ia tidak bisa menambah data.
+   */
+  const [supplierQuery, setSupplierQuery] = useState("");
+  const [supplierStatus, setSupplierStatus] = useState<SupplierStatusFilter>("all");
+  const [belowOnly, setBelowOnly] = useState(false);
+  const filterActive = isSupplierFilterActive({
+    query: supplierQuery,
+    status: supplierStatus,
+    belowThreshold: belowOnly,
+  });
+  const visible = useMemo(
+    () =>
+      filterSuppliers(ordered, {
+        query: supplierQuery,
+        status: supplierStatus,
+        belowThreshold: belowOnly,
+      }),
+    [ordered, supplierQuery, supplierStatus, belowOnly],
+  );
+  const clearFilter = () => {
+    setSupplierQuery("");
+    setSupplierStatus("all");
+    setBelowOnly(false);
+  };
+
+  /**
    * Eksklusi pemasok (`Rules.md` §1.2). Dialog ini HANYA mengirim USULAN: yang tercatat adalah
    * keputusan berstatus `pending_approval`, dan `suppliers.status` baru berubah setelah approver
    * SPPG pemasok menyetujuinya di halaman Keputusan. Karena itu tombol di sini tidak pernah
@@ -144,7 +178,7 @@ export default function SuppliersPage() {
     const lowest = list.reduce((min, s) =>
       s.reliabilityScore < min.reliabilityScore ? s : min,
     );
-    const below = list.filter((s) => s.reliabilityScore < 0.85).length;
+    const below = list.filter((s) => s.reliabilityScore < RELIABILITY_THRESHOLD).length;
     return [
       {
         label: "Pemasok terpantau",
@@ -153,20 +187,20 @@ export default function SuppliersPage() {
       },
       {
         label: "Rata-rata skor",
-        value: avg.toFixed(2),
+        value: formatScore(avg),
         hint: "skala 0–1 (Schema.md §1)",
         tone: scoreTone(avg),
       },
       {
         label: "Skor terendah",
-        value: `${lowest.reliabilityScore.toFixed(2)} · ${lowest.id}`,
+        value: `${formatScore(lowest.reliabilityScore)} · ${lowest.id}`,
         hint: lowest.name,
         tone: scoreTone(lowest.reliabilityScore),
       },
       {
-        label: "Di bawah 0,85",
+        label: `Di bawah ${formatScore(RELIABILITY_THRESHOLD)}`,
         value: String(below),
-        hint: "perlu perhatian di keputusan berikutnya",
+        hint: "perlu perhatian",
         tone: below > 0 ? "warning" : "safe",
       },
     ] as const;
@@ -232,22 +266,93 @@ export default function SuppliersPage() {
 
       <MetricStrip items={[...metrics]} className="animate-fade-up" />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <section className="flex flex-col gap-3">
+      <div className="grid gap-6 lg:grid-cols-5">
+        <section className="flex flex-col gap-3 lg:col-span-3">
           <h2 className="font-semibold text-navy-900">Pemasok</h2>
-          {ordered.map((s, i) => {
+
+          {/* Penyaring daftar. Pola kelasnya disamakan dengan filter Agent Log supaya dua
+              layar tidak punya gaya filter yang berbeda (skill: `navigation-consistency`). */}
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
+            <label className="flex min-w-[10rem] flex-1 items-center">
+              <span className="sr-only">Cari pemasok</span>
+              <input
+                value={supplierQuery}
+                onChange={(e) => setSupplierQuery(e.target.value)}
+                placeholder="Cari nama atau id pemasok…"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Status:</span>
+              <select
+                value={supplierStatus}
+                onChange={(e) => setSupplierStatus(e.target.value as SupplierStatusFilter)}
+                className="h-9 cursor-pointer rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="all">Semua status</option>
+                <option value="active">Aktif</option>
+                <option value="excluded">Dikecualikan</option>
+              </select>
+            </label>
+            <Button
+              type="button"
+              variant={belowOnly ? "default" : "outline"}
+              size="sm"
+              aria-pressed={belowOnly}
+              onClick={() => setBelowOnly((value) => !value)}
+              className="cursor-pointer"
+            >
+              Skor &lt; {formatScore(RELIABILITY_THRESHOLD)}
+            </Button>
+            {filterActive && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={clearFilter}
+                className="cursor-pointer"
+              >
+                Bersihkan
+              </Button>
+            )}
+          </div>
+
+          <p className="text-xs text-grey-500" role="status">
+            {filterActive
+              ? `Menampilkan ${visible.length} dari ${ordered.length} pemasok di cakupan Anda.`
+              : `${ordered.length} pemasok di cakupan Anda.`}
+          </p>
+
+          {visible.length === 0 ? (
+            <EmptyState
+              title="Tidak ada pemasok yang cocok"
+              description="Penyaring yang aktif tidak menyisakan satu pun pemasok di cakupan Anda. Pemasok di luar cakupan peran tidak ikut dihitung."
+              action={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearFilter}
+                  className="cursor-pointer"
+                >
+                  Bersihkan penyaring
+                </Button>
+              }
+            />
+          ) : (
+            visible.map((s, i) => {
             const tone = scoreTone(s.reliabilityScore);
             return (
               <div
                 key={s.id}
                 style={{ animationDelay: `${i * 50}ms` }}
-                className="animate-fade-up flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                className="animate-fade-up flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-brand/40 hover:bg-accent/40"
               >
                 <button
                   type="button"
                   onClick={() => openDetail(s)}
                   aria-label={`Lihat detail ${s.name}`}
-                  className="min-w-0 flex-1 rounded-md text-left"
+                  className="min-w-0 flex-1 basis-40 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <span className="flex items-center gap-2 truncate font-medium text-navy-900">
                     {s.name}
@@ -263,7 +368,7 @@ export default function SuppliersPage() {
                     </span>
                   )}
                 </button>
-                <span className="flex shrink-0 items-center gap-2">
+                <span className="flex shrink-0 flex-wrap items-center gap-2">
                   <span
                     className={cn(
                       "inline-block h-2 w-2 rounded-full",
@@ -276,14 +381,15 @@ export default function SuppliersPage() {
                     aria-hidden
                   />
                   <span className="tabular-nums font-semibold text-navy-900">
-                    {s.reliabilityScore.toFixed(2)}
+                    {formatScore(s.reliabilityScore)}
                   </span>
-                  <Button variant="ghost" onClick={() => openDetail(s)}>
+                  <Button variant="ghost" size="sm" onClick={() => openDetail(s)}>
                     Detail
                   </Button>
                   {s.status === "active" && userCanApprove && (
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => {
                         setExclusionError(null);
                         setExclusionReason("");
@@ -296,7 +402,8 @@ export default function SuppliersPage() {
                 </span>
               </div>
             );
-          })}
+            })
+          )}
         </section>
 
         <div className="flex flex-col gap-4 lg:col-span-2">

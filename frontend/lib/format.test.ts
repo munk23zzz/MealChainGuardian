@@ -3,12 +3,27 @@ import {
   formatRupiah,
   formatKg,
   formatPercent,
+  formatScore,
   formatMinutes,
   formatDate,
   formatTime,
   formatDateTime,
   formatDurationMs,
 } from "./format";
+
+describe("formatScore", () => {
+  it("memakai desimal koma (kebiasaan Indonesia)", () => {
+    expect(formatScore(0.8)).toBe("0,80");
+    expect(formatScore(0.62)).toBe("0,62");
+    expect(formatScore(1)).toBe("1,00");
+    expect(formatScore(0)).toBe("0,00");
+  });
+
+  it("menghormati jumlah digit", () => {
+    expect(formatScore(0.805, 3)).toBe("0,805");
+    expect(formatScore(0.8, 0)).toBe("1");
+  });
+});
 
 describe("formatRupiah", () => {
   it("memformat nol", () => {

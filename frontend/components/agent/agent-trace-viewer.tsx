@@ -137,7 +137,7 @@ export function AgentTraceViewer({
 
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-navy-700">
+                <span className="font-mono text-xs font-semibold uppercase tracking-wide text-navy-700">
                   {step.step}
                 </span>
                 <span className="text-sm font-semibold text-navy-900">

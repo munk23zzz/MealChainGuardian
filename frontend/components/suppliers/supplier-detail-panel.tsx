@@ -14,7 +14,7 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status/status-badge";
 import { useSupplier } from "@/hooks/use-data";
-import { formatDateTime, formatKg, formatRupiah } from "@/lib/format";
+import { formatDateTime, formatKg, formatRupiah, formatScore } from "@/lib/format";
 import { latestPriceByCommodity, summariseSupplierDetail } from "@/lib/supplier-detail";
 import type { SupplierBatch } from "@/lib/api/schema";
 
@@ -119,7 +119,7 @@ export function SupplierDetailPanel({
               <span className="text-muted-foreground">
                 {locationLabel(data.supplier.locationId)} · skor kepercayaan{" "}
                 <span className="tabular-nums font-semibold text-navy-900">
-                  {data.supplier.reliabilityScore.toFixed(2)}
+                  {formatScore(data.supplier.reliabilityScore)}
                 </span>{" "}
                 <span className="font-mono text-xs">suppliers.reliability_score</span>
               </span>
@@ -146,7 +146,7 @@ export function SupplierDetailPanel({
                       value={
                         ringkas.lowestFreshnessScore === null
                           ? "belum dinilai"
-                          : ringkas.lowestFreshnessScore.toFixed(2)
+                          : formatScore(ringkas.lowestFreshnessScore)
                       }
                     />
                   </div>
@@ -214,7 +214,7 @@ export function SupplierDetailPanel({
                                 </Badge>
                                 {batch.freshnessScore !== null && (
                                   <span className="tabular-nums text-muted-foreground">
-                                    {batch.freshnessScore.toFixed(2)}
+                                    {formatScore(batch.freshnessScore)}
                                   </span>
                                 )}
                               </span>

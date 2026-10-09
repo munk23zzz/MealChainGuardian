@@ -25,6 +25,14 @@ export function formatPercent(value: number): string {
   return Number.isInteger(value) ? `${value}%` : `${value}%`.replace(".", ",");
 }
 
+/**
+ * Skor 0–1 dengan desimal koma (kebiasaan Indonesia, sama seperti copy design.md: "DEFAULT 0,80").
+ * Dipakai untuk skor kepercayaan & kesegaran supaya satu layar tidak mencampur "0.80" dan "0,85".
+ */
+export function formatScore(value: number, digits = 2): string {
+  return value.toFixed(digits).replace(".", ",");
+}
+
 /** Format menit sebagai menit atau jam. */
 export function formatMinutes(value: number): string {
   if (value < 1) {

@@ -221,7 +221,7 @@ function NotificationPanel({
                     <span className="mt-0.5 block text-xs text-muted-foreground line-clamp-2">
                       {n.description}
                     </span>
-                    <span className="mt-1 block text-[10px] text-muted-foreground">
+                    <span className="mt-1 block text-xs text-muted-foreground">
                       {timeAgo(n.createdAt)}
                     </span>
                   </span>

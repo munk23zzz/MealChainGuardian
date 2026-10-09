@@ -42,7 +42,7 @@ export function AttentionList({
             {rows.map((location) => (
               <li
                 key={location.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-2.5 transition-colors hover:bg-accent/40"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <StatusBadge kind="location" value={location.status} />
