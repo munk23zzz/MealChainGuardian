@@ -30,6 +30,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.freshness import (
+    band as freshness_band,
+    is_eligible,
+    status_for_ui,
+    worst_band,
+)
 from app.core.location_status import (
     FRESHNESS_WARNING_WINDOW,
     LocationStatus,
@@ -339,7 +345,7 @@ def _worst_safety(statuses: list[str]) -> SafetyStatus:
 
 
 def _freshness(earliest_usable_until: datetime | None, now: datetime) -> FreshnessStatus:
-    """Kesegaraan satu pasokan dari masa pakai TERPENDEK.
+    """Kesegaran satu pasokan dari masa pakai TERPENDEK (cadangan saat skor belum ada).
 
     `usable_until` kosong = freshness belum dievaluasi (`/freshness/evaluate` belum jalan), jadi
     dilaporkan `fresh` — bukan `expired` yang akan menuduh data yang memang belum ada.
@@ -353,6 +359,22 @@ def _freshness(earliest_usable_until: datetime | None, now: datetime) -> Freshne
     return "fresh"
 
 
+def _freshness_status(
+    bands: list[object], earliest_usable_until: datetime | None, now: datetime
+) -> FreshnessStatus:
+    """Status kesegaran satu pasokan: pita dokumen lebih dulu, masa simpan sebagai cadangan.
+
+    `docs/Skill.md` §3 menetapkan pita `freshness_score` (0.85 / 0.60) sebagai acuan final, jadi
+    pita TERBURUK dari batch pasangan itu yang dipakai (`core/freshness.py`). Kalau tidak satu batch
+    pun punya skor — `/freshness/evaluate` belum jalan — baru jatuh ke hitungan masa simpan, supaya
+    lokasi tidak ditandai bermasalah dari data yang memang belum ada.
+    """
+    mapped = status_for_ui(worst_band(bands))  # type: ignore[arg-type]
+    if mapped is not None:
+        return mapped
+    return _freshness(earliest_usable_until, now)
+
+
 def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uuid.UUID], PairSupply]:
     """Stok fisik/terpakai + status kesegaran/keamanan per (lokasi, komoditas), dari `batches`.
 
@@ -360,6 +382,11 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
     - batch `safety_status='fail'` TIDAK menambah stok terpakai (Schema.md §6: batch gagal aman
       tidak boleh jadi kandidat alokasi), dan batch yang `usable_until`-nya sudah lewat juga tidak;
       menganggap keduanya tersedia akan membuat lokasi kekurangan tampak hijau;
+    - batch yang `freshness_score`-nya DI BAWAH gerbang kesegaran (`core/freshness.py`,
+      `docs/Skill.md` §3) juga tidak menambah stok terpakai — ambang di dokumen kini punya wujud di
+      kode. Skor yang belum ada (NULL) TIDAK dihukum: itu data yang belum dievaluasi;
+    - status kesegaran memakai pita dokumen (0.85 / 0.60) bila ada skornya; masa simpan hanya
+      cadangan (`_freshness_status`);
     - stok FISIK tetap dihitung apa adanya (termasuk batch gagal) — itu yang dilihat petugas di rak;
     - tanda bahayanya tetap dihitung walau stoknya dibuang — justru itu yang membuat lokasi
       bermasalah terlihat di peta.
@@ -372,6 +399,7 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
             Batch.safety_status,
             Batch.temperature_log,
             Batch.harvested_at,
+            Batch.freshness_score,
         )
     ).all()
 
@@ -387,8 +415,17 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
     statuses: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = {}
     earliest: dict[tuple[uuid.UUID, uuid.UUID], datetime | None] = {}
     excursion: dict[tuple[uuid.UUID, uuid.UUID], bool] = {}
+    bands: dict[tuple[uuid.UUID, uuid.UUID], list[object]] = {}
 
-    for location_id, commodity_id, quantity_kg, safety_status, temperature_log, harvested_at in rows:
+    for (
+        location_id,
+        commodity_id,
+        quantity_kg,
+        safety_status,
+        temperature_log,
+        harvested_at,
+        freshness_score,
+    ) in rows:
         key = (location_id, commodity_id)
         quantity = _decimal(quantity_kg)
         batch_usable_until = derive_usable_until(harvested_at, commodity_names.get(commodity_id))
@@ -398,6 +435,7 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
         usable.setdefault(key, Decimal(0))
         counts[key] = counts.get(key, 0) + 1
         statuses.setdefault(key, []).append(safety_status)
+        bands.setdefault(key, []).append(freshness_band(freshness_score))
 
         current_earliest = earliest.get(key)
         if current_earliest is None or batch_usable_until < current_earliest:
@@ -405,7 +443,7 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
         if has_temperature_excursion(temperature_log):
             excursion[key] = True
 
-        if safety_status != "fail" and not expired:
+        if safety_status != "fail" and not expired and is_eligible(freshness_score):
             usable[key] += quantity
 
     return {
@@ -414,7 +452,7 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
             usable_kg=usable[key],
             batch_count=counts[key],
             safety_status=_worst_safety(statuses[key]),
-            freshness_status=_freshness(earliest.get(key), now),
+            freshness_status=_freshness_status(bands.get(key, []), earliest.get(key), now),
             has_temperature_excursion=excursion.get(key, False),
         )
         for key in physical

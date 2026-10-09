@@ -7,6 +7,7 @@ dimuat otomatis; variabel environment yang sudah di-set tetap menang (dotenv tid
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,6 +36,29 @@ def mock_store_kind() -> str:
     menyalakan `postgres` untuk kerja sehari-hari.
     """
     return os.environ.get("SAP_MOCK_STORE", "").strip().lower() or DEFAULT_MOCK_STORE
+
+
+# Ambang gerbang kesegaran (`docs/Skill.md` §3: "default 0.6, taruh di config, jangan hardcode").
+# Skor kesegaran di bawah ambang = batch tidak layak jadi kandidat alokasi, seperti batch gagal aman.
+DEFAULT_FRESHNESS_GATE_THRESHOLD = "0.60"
+
+
+def freshness_gate_threshold() -> Decimal:
+    """Ambang kesegaran dari env `FRESHNESS_GATE_THRESHOLD`.
+
+    Nilai yang bukan angka atau di luar 0..1 diabaikan (kembali ke default): gerbang 7.5 atau -1
+    akan membalik arti keputusan secara diam-diam, dan itu lebih berbahaya daripada salah eja env.
+    """
+    raw = os.environ.get("FRESHNESS_GATE_THRESHOLD", "").strip()
+    if not raw:
+        return Decimal(DEFAULT_FRESHNESS_GATE_THRESHOLD)
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        return Decimal(DEFAULT_FRESHNESS_GATE_THRESHOLD)
+    if not Decimal(0) <= value <= Decimal(1):
+        return Decimal(DEFAULT_FRESHNESS_GATE_THRESHOLD)
+    return value
 
 
 # Nilai cadangan HANYA untuk pengembangan lokal: token demo jadi bisa dipalsukan siapa pun yang tahu

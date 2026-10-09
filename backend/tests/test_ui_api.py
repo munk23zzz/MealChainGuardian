@@ -14,9 +14,12 @@ Semua endpoint UI ada di bawah `/ui/*` supaya kontrak domain (`/supply`, `/decis
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from api_support import (
     JAKARTA_HEAD,
@@ -25,6 +28,7 @@ from api_support import (
     propose,
     user_headers,
 )
+from app.models import Batch, Commodity, Location
 
 pytestmark = pytest.mark.usefixtures("client")
 
@@ -208,6 +212,116 @@ def test_supply_reports_failed_expired_and_excursing_batches(client):
     # Pasokan sehat tetap hijau.
     assert by_pair[("SPPG Jakarta Barat", "telur")]["safetyStatus"] == "PASS"
     assert by_pair[("SPPG Jakarta Barat", "telur")]["freshnessStatus"] == "fresh"
+
+
+# --- Gerbang kesegaran (`app/core/freshness.py`, docs/Skill.md §3) -----------------------------
+
+
+def _add_batch(
+    db_factory,
+    supplier_id: str,
+    *,
+    location: str,
+    commodity: str,
+    quantity: str,
+    freshness_score: Decimal | None,
+    harvested_at: datetime | None = None,
+    safety: str = "pass",
+) -> None:
+    """Sisipkan satu batch ke DB test — menguji gerbang kesegaran tanpa mengubah seed.
+
+    Pasangan (lokasi, komoditas) yang dipakai test di bawah sengaja yang BELUM ada di seed, supaya
+    angka jangkar `test_supply_keeps_the_documented_numbers` tidak tersentuh.
+    """
+    with db_factory() as session:
+        location_row = session.scalar(select(Location).where(Location.name == location))
+        commodity_row = session.scalar(select(Commodity).where(Commodity.name == commodity))
+        assert location_row is not None and commodity_row is not None
+        session.add(
+            Batch(
+                location_id=location_row.id,
+                commodity_id=commodity_row.id,
+                supplier_id=uuid.UUID(supplier_id),
+                quantity_kg=Decimal(quantity),
+                harvested_at=harvested_at or datetime.now(timezone.utc),
+                temperature_log=[],
+                safety_status=safety,
+                freshness_score=freshness_score,
+            )
+        )
+        session.commit()
+
+
+def test_skor_di_bawah_gerbang_tidak_dihitung_sebagai_stok_terpakai(client, db_factory, supplier_id):
+    """`freshness_score < 0.60` = tidak layak: stok fisik tetap terlihat, terpakai 0.
+
+    Dulu ambang itu hanya ada di dokumen (kolom `freshness_score` ditulis seed lalu tidak dibaca
+    siapa pun), jadi batch basi tetap ikut dihitung sebagai stok siap pakai.
+    """
+    _add_batch(
+        db_factory,
+        supplier_id,
+        location="SPPG Bekasi",
+        commodity="wortel",
+        quantity="500.00",
+        freshness_score=Decimal("0.50"),
+    )
+
+    row = _supply_by_pair(client)[("SPPG Bekasi", "wortel")]
+    assert row["physicalStockKg"] == 500.0
+    assert row["usableStockKg"] == 0.0  # <-- gerbang kesegaran menggigit di sini
+    assert row["freshnessStatus"] == "expired"
+    assert row["safetyStatus"] == "PASS"  # bukan karena keamanan — murni kesegaran
+
+
+def test_pita_needs_verification_tetap_layak_dipakai(client, db_factory, supplier_id):
+    """`0.60 <= skor < 0.85` = `needs_verification`, BUKAN gagal: stoknya masih boleh dipakai."""
+    _add_batch(
+        db_factory,
+        supplier_id,
+        location="SPPG Depok",
+        commodity="ayam",
+        quantity="300.00",
+        freshness_score=Decimal("0.70"),
+    )
+
+    row = _supply_by_pair(client)[("SPPG Depok", "ayam")]
+    assert row["usableStockKg"] == 300.0
+    assert row["freshnessStatus"] == "approaching_expiry"
+    assert row["safetyStatus"] == "PASS"
+
+
+def test_skor_belum_ada_tidak_dihukum(client, db_factory, supplier_id):
+    """Tanpa skor, status jatuh ke hitungan masa simpan (panen baru = `fresh`) dan stok tetap dipakai."""
+    _add_batch(
+        db_factory,
+        supplier_id,
+        location="SPPG Tangerang",
+        commodity="wortel",
+        quantity="220.00",
+        freshness_score=None,
+    )
+
+    row = _supply_by_pair(client)[("SPPG Tangerang", "wortel")]
+    assert row["usableStockKg"] == 220.0
+    assert row["freshnessStatus"] == "fresh"
+
+
+def test_gerbang_bisa_digeser_lewat_env(client, db_factory, supplier_id, monkeypatch):
+    """Ambang ada di config (docs/Skill.md §3: "taruh di config, jangan hardcode")."""
+    monkeypatch.setenv("FRESHNESS_GATE_THRESHOLD", "0.75")
+    _add_batch(
+        db_factory,
+        supplier_id,
+        location="SPPG Jakarta Timur",
+        commodity="ayam",
+        quantity="150.00",
+        freshness_score=Decimal("0.70"),
+    )
+
+    row = _supply_by_pair(client)[("SPPG Jakarta Timur", "ayam")]
+    assert row["usableStockKg"] == 0.0  # 0.70 < gerbang 0.75 → tidak layak
+    assert row["freshnessStatus"] == "approaching_expiry"  # pita dokumen tetap needs_verification
 
 
 # --- Keputusan (bentuk Recommendation) -------------------------------------------------------
