@@ -20,8 +20,7 @@
  * Event 2 dec-003 (price anomaly), Event 3 dec-002/dec-004 (safety disruption).
  */
 import type { ModelSource } from "./agent-log";
-import { reliabilitySeries } from "./reliability";
-import type { Supplier, SupplierHistory, SupplierDeliveryEvent } from "./api/schema";
+import type { Supplier } from "./api/schema";
 import type {
   AgentStep,
   Commodity,
@@ -772,23 +771,13 @@ export const MOCK_KPI_PREVIOUS: PreviousKpi = {
 };
 
 // ---------------------------------------------------------------------------
-// Pemasok + riwayat penerimaan (design.md §3.9c, Schema.md §1 `suppliers`)
+// Pemasok (Schema.md §1 `suppliers`)
 // ---------------------------------------------------------------------------
-/**
- * Skor SEBELUM histori yang kita miliki. Bukan angka baru: Schema.md §1
- * (`suppliers.reliability_score` DEFAULT 0.80) dan pemasok lama memang sudah
- * punya riwayat lebih panjang sebelum keputusan yang ada di feed.
- */
-const SUPPLIER_BASE_SCORES: Record<string, number> = {
-  "SUP-001": 0.8,
-  "SUP-002": 0.85,
-  "SUP-003": 0.88,
-  "SUP-004": 0.92,
-  "SUP-005": 0.8,
-  "SUP-006": 0.75,
-};
 
-/** Nama & lokasi asal pemasok — id-nya sama dengan yang dipakai label kandidat di keputusan. */
+/**
+ * Pemasok yang muncul di kandidat keputusan. Nama & lokasi asalnya sama dengan
+ * label kandidat di mock keputusan (id-nya dipakai di sana).
+ */
 const SUPPLIER_PROFILES: Record<string, { name: string; locationId: string }> = {
   "SUP-001": { name: "Koperasi Cianjur", locationId: "loc-10" },
   "SUP-002": { name: "Distributor Jakarta Barat", locationId: "loc-3" },
@@ -799,75 +788,21 @@ const SUPPLIER_PROFILES: Record<string, { name: string; locationId: string }> = 
 };
 
 /**
- * Riwayat penerimaan per pemasok (basis LEARN, Skill.md §10).
- * `dec-090`..`dec-107` adalah keputusan lama di luar feed aktif — riwayat inilah
- * yang membuat SUP-001 Koperasi Cianjur turun setelah dua insiden suhu, dan itu
- * yang membuatnya kalah dari SUP-004 di keputusan BERIKUTNYA (narasi Skill.md §11).
+ * Skor kepercayaan pemasok — STATIS, nilai DEFAULT kolom
+ * `suppliers.reliability_score` (Schema.md §1). Dulu angka ini dihitung ulang dari
+ * riwayat penerimaan lewat LEARN; mekanisme itu dihapus bersama `decisions.outcome`
+ * pada revisi dokumen 9 Okt, jadi tidak ada lagi riwayat yang menggerakkan skor di UI.
  */
-export const MOCK_SUPPLIER_EVENTS: Record<string, SupplierDeliveryEvent[]> = {
-  "SUP-001": [
-    { at: "2026-09-22T09:10:00.000Z", outcome: "success", decisionId: "dec-090", commodityId: "com-telur", quantityKg: 120 },
-    { at: "2026-09-25T09:05:00.000Z", outcome: "success", decisionId: "dec-091", commodityId: "com-telur", quantityKg: 140 },
-    { at: "2026-09-28T09:20:00.000Z", outcome: "success", decisionId: "dec-092", commodityId: "com-ayam", quantityKg: 90 },
-    { at: "2026-10-01T09:00:00.000Z", outcome: "failure", decisionId: "dec-093", commodityId: "com-telur", quantityKg: 130, note: "Suhu tiba 9,4 °C (di atas ambang 8 °C)" },
-    { at: "2026-10-05T09:15:00.000Z", outcome: "success", decisionId: "dec-094", commodityId: "com-telur", quantityKg: 110 },
-    { at: "2026-10-07T02:35:00.000Z", outcome: "failure", decisionId: "dec-095", commodityId: "com-telur", quantityKg: 150, note: "Temperature excursion 6 jam — batch dinyatakan FAIL" },
-  ],
-  "SUP-002": [
-    { at: "2026-09-30T08:40:00.000Z", outcome: "success", decisionId: "dec-096", commodityId: "com-telur", quantityKg: 150 },
-    { at: "2026-10-04T08:45:00.000Z", outcome: "success", decisionId: "dec-097", commodityId: "com-telur", quantityKg: 130 },
-  ],
-  "SUP-003": [
-    { at: "2026-09-20T07:55:00.000Z", outcome: "success", decisionId: "dec-098", commodityId: "com-wortel", quantityKg: 200 },
-    { at: "2026-09-27T08:10:00.000Z", outcome: "success", decisionId: "dec-099", commodityId: "com-wortel", quantityKg: 180 },
-    { at: "2026-10-03T08:05:00.000Z", outcome: "success", decisionId: "dec-100", commodityId: "com-ayam", quantityKg: 160 },
-  ],
-  "SUP-004": [
-    { at: "2026-09-24T08:30:00.000Z", outcome: "success", decisionId: "dec-101", commodityId: "com-telur", quantityKg: 140 },
-    { at: "2026-09-29T08:25:00.000Z", outcome: "success", decisionId: "dec-102", commodityId: "com-wortel", quantityKg: 175 },
-    { at: "2026-10-06T08:35:00.000Z", outcome: "success", decisionId: "dec-103", commodityId: "com-telur", quantityKg: 120 },
-  ],
-  "SUP-005": [
-    { at: "2026-09-26T08:50:00.000Z", outcome: "success", decisionId: "dec-104", commodityId: "com-ayam", quantityKg: 150 },
-    { at: "2026-10-02T09:25:00.000Z", outcome: "failure", decisionId: "dec-105", commodityId: "com-ayam", quantityKg: 145, note: "Rusak sebagian 12 kg saat bongkar muat" },
-  ],
-  "SUP-006": [
-    { at: "2026-09-23T08:15:00.000Z", outcome: "success", decisionId: "dec-106", commodityId: "com-wortel", quantityKg: 95 },
-    { at: "2026-10-06T08:20:00.000Z", outcome: "success", decisionId: "dec-107", commodityId: "com-telur", quantityKg: 100 },
-  ],
-};
+const SUPPLIER_SCORE_DEFAULT = 0.8;
 
-/**
- * `reliability_score` DIHITUNG dari riwayat di atas lewat replay LEARN yang sama
- * dengan yang dipakai UI (`lib/reliability.ts`) — satu sumber, tidak ada angka
- * yang diketik dua kali dan bisa jadi tidak sinkron.
- */
-export const MOCK_SUPPLIERS: Supplier[] = Object.keys(SUPPLIER_PROFILES).map((id) => {
-  const events = MOCK_SUPPLIER_EVENTS[id] ?? [];
-  const series = reliabilitySeries(SUPPLIER_BASE_SCORES[id] ?? 0.8, events);
-  return {
+export const MOCK_SUPPLIERS: Supplier[] = Object.entries(SUPPLIER_PROFILES).map(
+  ([id, profile]) => ({
     id,
-    name: SUPPLIER_PROFILES[id].name,
-    locationId: SUPPLIER_PROFILES[id].locationId,
-    reliabilityScore: series[series.length - 1].score,
-  };
-});
-
-/**
- * Riwayat pemasok untuk layar §3.9c. Replay memakai fungsi yang sama dengan
- * LEARN di produksi, jadi grafik "sebelum/sesudah insiden" tidak bisa berbohong.
- * Skor terkini di `MOCK_SUPPLIERS` disegarkan dari hasil replay (satu sumber).
- */
-export function mockSupplierHistory(supplierId: string): SupplierHistory | null {
-  const profile = SUPPLIER_PROFILES[supplierId];
-  if (!profile) return null;
-  const events = MOCK_SUPPLIER_EVENTS[supplierId] ?? [];
-  const points = reliabilitySeries(SUPPLIER_BASE_SCORES[supplierId] ?? 0.8, events);
-  const currentScore = points[points.length - 1].score;
-  const supplier = MOCK_SUPPLIERS.find((s) => s.id === supplierId);
-  if (supplier) supplier.reliabilityScore = currentScore;
-  return { supplierId, currentScore, points, events };
-}
+    name: profile.name,
+    locationId: profile.locationId,
+    reliabilityScore: SUPPLIER_SCORE_DEFAULT,
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Commodities — 3 komoditas yang di-scope untuk demo

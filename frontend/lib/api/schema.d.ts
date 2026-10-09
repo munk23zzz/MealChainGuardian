@@ -35,12 +35,10 @@ export type CommodityName = "telur" | "ayam" | "wortel";
 export type DecisionStatus =
   | "proposed"
   | "verifier_flagged"
-  | "verifier_unavailable"
   | "pending_approval"
   | "approved"
   | "rejected"
-  | "executed"
-  | "expired";
+  | "executed";
 
 /**
  * Jenis keputusan (Schema.md §3 `decisions.decision_type`). Dipakai untuk
@@ -238,11 +236,6 @@ export interface Recommendation {
    */
   expiresAt?: string;
   executedAt?: string;
-  /**
-   * Hasil setelah barang diterima/dicek (Schema.md §3 `decisions.outcome`) —
-   * basis mekanisme LEARN (Skill.md §10). NULL/'pending' = belum diperiksa.
-   */
-  outcome?: "pending" | "success" | "failure";
   /** Purchase order di SAP (mock) yang lahir dari approval keputusan ini. */
   sapPurchaseOrder?: SapPurchaseOrder;
   agentTrace?: AgentStep[];
@@ -304,66 +297,13 @@ export interface KpiSnapshot extends Partial<KPI> {
   unavailable?: Partial<Record<keyof KPI, string>>;
 }
 
-/** Pemasok (Schema.md §1 `suppliers`) — skor kepercayaan diperbarui lewat LEARN (Skill.md §10). */
+/** Pemasok (Schema.md §1 `suppliers`) — skor kepercayaan statis dari backend. */
 export interface Supplier {
   id: string;
   name: string;
   locationId: string;
-  /** 0..1, DEFAULT 0.80 di DB. Disetel deterministik dari `decisions.outcome`, bukan training model. */
+  /** 0..1, DEFAULT 0.80 di DB (Schema.md §1 `suppliers.reliability_score`). */
   reliabilityScore: number;
-}
-
-/** Hasil penerimaan barang (`decisions.outcome`, Schema.md §3). */
-export type DeliveryOutcome = "success" | "failure";
-
-/** Satu kejadian penerimaan untuk riwayat reliability pemasok (design.md §3.9c). */
-export interface SupplierDeliveryEvent {
-  at: string;
-  outcome: DeliveryOutcome;
-  decisionId: string;
-  commodityId: string;
-  quantityKg: number;
-  note?: string;
-}
-
-/** Body Receiving Inspection (design.md §3.5b). */
-export interface ReceivingInspectionRequest {
-  decisionId: string;
-  measuredTempC: number;
-  physicalCondition: "baik" | "rusak_sebagian" | "rusak";
-  note?: string;
-}
-
-/** Hasil Receiving Inspection: evidence `human_inspection` baru + `decisions.outcome` terisi. */
-export interface ReceivingInspectionResult {
-  decision: Recommendation;
-  evidenceId: string;
-  outcome: DeliveryOutcome;
-  /** true bila `failure` → menurunkan `reliability_score` pemasok (design.md §3.5b). */
-  affectsSupplierReliability: boolean;
-}
-
-/** Satu titik skor kepercayaan pemasok (hasil replay riwayat, bukan angka baru). */
-export interface SupplierScorePoint {
-  /** ISO timestamp kejadian; null = titik awal (skor sebelum histori). */
-  at: string | null;
-  score: number;
-  outcome: DeliveryOutcome | null;
-  /** true bila titik ini insiden/penurunan — dasar marker di grafik. */
-  isIncident: boolean;
-  decisionId?: string;
-}
-
-/**
- * Riwayat pemasok untuk design.md §3.9c: skor sebelum/sesudah insiden.
- * Dihitung backend dari `suppliers.reliability_score` + riwayat
- * `decisions.outcome` (LEARN, Skill.md §10) — frontend tidak menghitung sendiri.
- */
-export interface SupplierHistory {
-  supplierId: string;
-  currentScore: number;
-  points: SupplierScorePoint[];
-  events: SupplierDeliveryEvent[];
 }
 
 /** Request body untuk login. */

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import SessionDep
 from app.api.types import Quantity
 from app.core.approval_rules import ApprovalVote, missing_roles
-from app.models import Approval, AgentTrace, Decision, DecisionEvidence
+from app.models import Approval, AgentTrace, Decision, DecisionEvidence, User
 from app.models.decisions import APPROVER_ROLES
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
@@ -28,6 +28,8 @@ router = APIRouter(prefix="/decisions", tags=["decisions"])
 class ApprovalOut(BaseModel):
     id: str
     approved_by: str
+    # Peran approver DITURUNKAN dari `users.role` saat dibaca — kolom snapshot
+    # `approvals.approver_role` dihapus dari skema (docs/Schema.md §3, revisi 9 Okt).
     approver_role: str
     approved: bool
     comment: str | None
@@ -56,7 +58,6 @@ class DecisionOut(BaseModel):
     id: str
     decision_type: str
     status: str
-    outcome: str | None
     proposed_by: str
     verified_by: str | None
     verifier_note: str | None
@@ -92,22 +93,37 @@ def _commodity_name(session: Session, commodity_id: uuid.UUID | None) -> str | N
     return commodity.name if commodity else None
 
 
+def _approval_rows(session: Session, decision_id: uuid.UUID) -> list[tuple[Approval, str]]:
+    """Baris approval + peran approver saat ini, dibaca dari `users.role`.
+
+    Peran tidak lagi disimpan di baris approval (`docs/Schema.md` §3, revisi 9 Okt): yang
+    tersimpan adalah siapa yang approve, dan perannya mengikuti akun itu.
+    """
+    return list(
+        session.execute(
+            select(Approval, User.role)
+            .join(User, User.id == Approval.approved_by)
+            .where(Approval.decision_id == decision_id)
+            .order_by(Approval.approved_at)
+        ).all()
+    )
+
+
 def approval_votes(session: Session, decision_id: uuid.UUID) -> list[ApprovalVote]:
-    """Approval tersimpan, dalam bentuk yang dipahami `core/approval_rules.py`."""
-    rows = session.execute(
-        select(Approval).where(Approval.decision_id == decision_id).order_by(Approval.approved_at)
-    ).scalars().all()
+    """Approval tersimpan, dalam bentuk yang dipahami `core/approval_rules.py`.
+
+    Peran approver diambil dari `users.role` (join), bukan dari baris approval: kolom snapshot
+    `approvals.approver_role` sudah dihapus dari skema (docs/Schema.md §3, revisi 9 Okt).
+    """
     return [
-        ApprovalVote(approver_id=row.approved_by, role=row.approver_role, approved=row.approved)
-        for row in rows
+        ApprovalVote(approver_id=row.approved_by, role=role, approved=row.approved)
+        for row, role in _approval_rows(session, decision_id)
     ]
 
 
 def build_decision_out(session: Session, decision: Decision) -> DecisionOut:
     """Serialisasi keputusan + jejak auditnya. Dipakai juga oleh `api/actions.py`."""
-    approvals = session.execute(
-        select(Approval).where(Approval.decision_id == decision.id).order_by(Approval.approved_at)
-    ).scalars().all()
+    approval_rows = _approval_rows(session, decision.id)
     traces = session.execute(
         select(AgentTrace)
         .where(AgentTrace.decision_id == decision.id)
@@ -120,15 +136,14 @@ def build_decision_out(session: Session, decision: Decision) -> DecisionOut:
     ).scalars().all()
 
     votes = [
-        ApprovalVote(approver_id=row.approved_by, role=row.approver_role, approved=row.approved)
-        for row in approvals
+        ApprovalVote(approver_id=row.approved_by, role=role, approved=row.approved)
+        for row, role in approval_rows
     ]
 
     return DecisionOut(
         id=str(decision.id),
         decision_type=decision.decision_type,
         status=decision.status,
-        outcome=decision.outcome,
         proposed_by=decision.proposed_by,
         verified_by=decision.verified_by,
         verifier_note=decision.verifier_note,
@@ -144,12 +159,12 @@ def build_decision_out(session: Session, decision: Decision) -> DecisionOut:
             ApprovalOut(
                 id=str(row.id),
                 approved_by=str(row.approved_by),
-                approver_role=row.approver_role,
+                approver_role=role,
                 approved=row.approved,
                 comment=row.comment,
                 approved_at=row.approved_at,
             )
-            for row in approvals
+            for row, role in approval_rows
         ],
         missing_approval_roles=sorted(missing_roles(decision.status, votes)),
         agent_traces=[
@@ -210,7 +225,7 @@ def get_decision(session: SessionDep, decision_id: str) -> DecisionOut:
 
 
 # Peran yang boleh meng-approve, dipakai UI untuk menyembunyikan tombol yang akan ditolak server.
-# Penegakannya tetap di server (docs/Skill.md §9), ini hanya kenyamanan tampilan.
+# Penegakannya tetap di server (docs/Schema.md §3), ini hanya kenyamanan tampilan.
 APPROVER_ROLES_FOR_DISPLAY: tuple[str, ...] = APPROVER_ROLES
 
 

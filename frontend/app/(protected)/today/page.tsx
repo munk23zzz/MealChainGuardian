@@ -45,8 +45,7 @@ export default function TodayPage() {
         (decision) =>
           decisionTouchesScope(decision, scope, locations) &&
           (decision.status === "pending_approval" ||
-            decision.status === "verifier_flagged" ||
-            decision.status === "verifier_unavailable"),
+            decision.status === "verifier_flagged"),
       ).length,
     [decisions, scope, locations],
   );
@@ -70,18 +69,6 @@ export default function TodayPage() {
   const tasks = useMemo<TaskItem[]>(() => {
     const list: TaskItem[] = [];
 
-    if (role === "sppg_head" || role === "sppg_nutritionist") {
-      list.push({
-        id: "receiving",
-        title: "Catat penerimaan hari ini",
-        detail:
-          "Catat kondisi barang yang baru tiba: suhu terukur dan kondisi fisiknya.",
-        href: "/receiving",
-        tone: "safe",
-        meta: "Kepala/Ahli Gizi SPPG",
-      });
-    }
-
     if (pendingCount > 0) {
       list.push({
         id: "decisions",
@@ -89,7 +76,7 @@ export default function TodayPage() {
         detail: `${pendingCount} keputusan di cakupan Anda menunggu tindakan manusia.`,
         href: "/decisions",
         tone: "warning",
-        meta: "Termasuk yang ditandai verifier atau saat verifier tak tersedia",
+        meta: "Termasuk yang ditandai verifier",
       });
     }
 
@@ -105,7 +92,7 @@ export default function TodayPage() {
     }
 
     return list;
-  }, [role, pendingCount, ccpIssueCount]);
+  }, [pendingCount, ccpIssueCount]);
 
   const header = (
     <div className="animate-fade-up flex flex-col gap-2">

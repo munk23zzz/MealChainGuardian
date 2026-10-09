@@ -1,7 +1,7 @@
 """MockSAPProvider — implementasi default (dan permanen) MVP.
 
 Meniru struktur OData SAP persis (docs/Skill.md §6) dan menyajikan angka baku demo
-(docs/Skill.md §11). Lihat TODO.md S1-02: "MockSAPProvider — ini permanen, bukan sementara".
+(angkanya tinggal di `app/db_seed.py`). Lihat TODO.md S1-02: "MockSAPProvider — ini permanen, bukan sementara".
 
 Catatan store: docs/Schema.md §4 menaruh data mock di tabel Postgres `sap_mock_material_stock` dan
 `sap_mock_purchase_orders`. Provider di sini hanya berbicara ke abstraksi `SapMockStore`, sehingga
@@ -60,7 +60,7 @@ class SapMockStore(Protocol):
 
 
 class InMemorySapMockStore:
-    """Store in-memory, di-seed dengan angka baku docs/Skill.md §11.
+    """Store in-memory, di-seed dengan angka baku demo (`app/db_seed.py`).
 
     Seed: Cianjur (CJ01) 1.400 kg telur, Jakarta (JK01) 300 kg telur — persis angka yang dipakai
     narasi demo Event 1 (surplus 900 kg vs shortage 700 kg).
@@ -129,7 +129,7 @@ def _seed_stock() -> tuple[MaterialStockRecord, ...]:
 
 
 def _seed_business_partners() -> tuple[BusinessPartnerRecord, ...]:
-    # Nama fiktif sesuai docs/Skill.md §11 — tidak boleh menyerupai perusahaan/orang nyata.
+    # Nama fiktif sesuai angka baku demo (`app/db_seed.py`) — tidak boleh menyerupai perusahaan/orang nyata.
     # Kode pemasok datang dari field_mapping (satu sumber), supaya provider in-memory dan provider
     # Postgres tidak pernah berbeda identitas.
     return tuple(

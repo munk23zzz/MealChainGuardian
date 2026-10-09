@@ -15,10 +15,8 @@ describe("isProtectedPath", () => {
   });
 
   it("true untuk SEMUA halaman di grup (protected)", () => {
-    // Bug lama: /receiving & /suppliers tidak terdaftar sehingga halaman kosong
-    // tanpa redirect saat belum login.
+    // Bug lama: /suppliers tidak terdaftar sehingga halaman kosong tanpa redirect saat belum login.
     for (const path of [
-      "/receiving",
       "/suppliers",
       "/today",
       "/compliance",

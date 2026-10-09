@@ -19,6 +19,7 @@ import { useAuth } from "@/contexts/auth";
 import { useToast } from "@/components/ui/toast";
 import { approveDecision, executeDecision, rejectDecision } from "@/lib/api";
 import { approvalDenialReason, canApproveForLocation } from "@/lib/auth";
+import { expiryState } from "@/lib/expiry";
 import type { Recommendation } from "@/lib/api/schema";
 
 /**
@@ -108,12 +109,11 @@ export function ApprovalActions({
     },
   });
 
-  // Skill.md §9 + Schema.md §6: `verifier_flagged` DAN `verifier_unavailable`
-  // sama-sama butuh 2 approval (Kepala + Ahli Gizi dari SPPG yang sama).
+  // Schema.md §3: `verifier_flagged` butuh 2 approval (Kepala + Ahli Gizi dari SPPG
+  // yang sama); `pending_approval` cukup 1.
   const canApprove =
     recommendation.status === "pending_approval" ||
-    recommendation.status === "verifier_flagged" ||
-    recommendation.status === "verifier_unavailable";
+    recommendation.status === "verifier_flagged";
   const canExecute = recommendation.status === "approved";
   const permitted =
     userCanApprove &&
@@ -133,14 +133,14 @@ export function ApprovalActions({
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-4">
         <span className="font-medium text-navy-900">Status keputusan:</span>
         <StatusBadge kind="decision" value={recommendation.status} />
-        {recommendation.status === "expired" && (
+        {expiryState(recommendation.expiresAt) === "expired" && (
           <span className="text-muted-foreground">
             Lewat batas waktu
             {recommendation.expiresAt
               ? ` (${formatDateTime(recommendation.expiresAt)})`
               : ""}{" "}
-            — keputusan kedaluwarsa tidak pernah dieksekusi (Schema.md §6); Supervisor
-            mengulang dari DETECT dengan data terbaru.
+            — keputusan yang lewat `expires_at` tidak pernah dieksekusi (Schema.md §3);
+            Supervisor mengulang dari DETECT dengan data terbaru.
           </span>
         )}
         {recommendation.sapPurchaseOrder && (

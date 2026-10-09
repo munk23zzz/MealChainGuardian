@@ -1,7 +1,7 @@
 """Seed data demo ke Postgres.
 
 Isi: master data (lokasi/komoditas/pemasok), tabel mock SAP (`docs/Schema.md` §4) berisi angka baku
-`docs/Skill.md` §11, akun demo, dan tarikan awal ke `supply_records`.
+Angka baku demo, akun demo, dan tarikan awal ke `supply_records`.
 
 Jalankan:  python -m app.db_seed
 Idempoten: data master dicocokkan berdasarkan nama/kode, tabel mock ditulis ulang.
@@ -16,6 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
+from app.core.shelf_life import DEFAULT_SHELF_LIFE_HOURS
 from app.db import get_session_factory
 from app.ingest import sync_supply_records
 from app.models import (
@@ -36,7 +37,7 @@ from app.sap_integration.field_mapping import (
 from app.sap_integration.mock_provider import MockSAPProvider
 from app.sap_integration.sql_mock_store import SqlSapMockStore
 
-# --- master data (docs/Skill.md §11: Cianjur surplus, Jakarta shortage) ------------------
+# --- master data (`app/db_seed.py`: Cianjur surplus, Jakarta shortage) ------------------
 
 LOCATIONS = (
     {
@@ -54,7 +55,7 @@ LOCATIONS = (
         "role_hint": "demand_hub",
     },
     # --- 8 titik tambahan dari dataset mock UI (`frontend/lib/mock-data.ts`) ----------------
-    # Ditambahkan supaya mode nyata tampil sekaya mode demo. Angka §11 (Cianjur/Jakarta) tidak
+    # Ditambahkan supaya mode nyata tampil sekaya mode demo. Angka baku demo (Cianjur/Jakarta) tidak
     # diubah; identitasnya pun tetap kota, bukan SPPG, karena narasi Event 1 memakai keduanya.
     # "SPPG Jakarta Pusat" di mock TIDAK diambil: titik "Jakarta" di atas sudah mewakili pusat,
     # dan menambahkan keduanya berarti menghitung kebutuhan Jakarta dua kali.
@@ -123,7 +124,8 @@ COMMODITIES = (
 )
 
 # Pemasok fiktif (tidak menyerupai perusahaan/orang nyata). reliability_score memakai default
-# Schema.md (0.80); angka berbeda menyusul bersama alur LEARN (Skill.md §10).
+# Schema.md (0.80). Skor TIDAK lagi dihitung ulang: LEARN dihapus bersama
+# `decisions.outcome` (revisi dokumen 9 Okt), jadi nilainya statis.
 SUPPLIERS = (
     {"name": "Supplier A", "location": "Cianjur", "reliability_score": Decimal("0.80")},
     {"name": "Supplier B", "location": "Cianjur", "reliability_score": Decimal("0.80")},
@@ -132,7 +134,7 @@ SUPPLIERS = (
 
 # Baris pasokan demo — satu baris = satu pasangan (lokasi, komoditas).
 #
-# Angka baku docs/Skill.md §11 (Cianjur 1.400/500 kg, Jakarta 300/1.000 kg) tetap utuh; delapan titik
+# Angka baku `app/db_seed.py` (Cianjur 1.400/500 kg, Jakarta 300/1.000 kg) tetap utuh; delapan titik
 # SPPG lain diambil dari dataset mock UI (`frontend/lib/mock-data.ts`) supaya mode nyata tampil sekaya
 # mode demo. `batch_count` hanya MEMECAH jumlah itu jadi beberapa batch (mengikuti angka mock), bukan
 # menambah stok.
@@ -146,10 +148,10 @@ SUPPLIERS = (
 #                                (Schema.md §6), tapi justru itu yang membuatnya merah di peta
 # `temperature_c` di atas 4 °C = penyimpangan rantai dingin (`frontend/lib/ccp.ts`, rule `chilled`).
 #
-# CATATAN: `SapMockMaterialStock` in-memory (`InMemorySapMockStore`) masih memakai angka §11 saja —
+# CATATAN: `SapMockMaterialStock` in-memory (`InMemorySapMockStore`) masih memakai angka baku demo saja —
 # ia fixture kontrak layer SAP. Store Postgres (mode yang dijalankan demo) memakai tabel di sini.
 SUPPLY_ROWS = (
-    # §11 — batch-nya sengaja SATU per titik supaya kode batch B-2026-0101/0102 (dipakai contract
+    # Angka baku demo — batch-nya sengaja SATU per titik supaya kode batch B-2026-0101/0102 (dipakai contract
     # test SAP) tidak berubah.
     {"location": "Cianjur", "commodity": "telur", "quantity": Decimal("1400.00"), "batch_count": 1,
      "price_per_kg": Decimal("26500.00"), "safety": "pass", "freshness_hours": 72,
@@ -216,7 +218,7 @@ SUPPLY_ROWS = (
      "freshness_hours": 72, "temperature_c": None},
 )
 
-# Demand per (lokasi, komoditas). §11 untuk Cianjur/Jakarta, sisanya dari mock UI. Titik yang tidak
+# Demand per (lokasi, komoditas). Angka baku demo untuk Cianjur/Jakarta, sisanya dari mock UI. Titik yang tidak
 # punya baris di sini dianggap tidak punya kebutuhan — bukan kebutuhan nol yang dikarang.
 DEMAND_ROWS = (
     {"location": "Cianjur", "commodity": "telur", "quantity": Decimal("500.00"), "days_ahead": 3},
@@ -241,14 +243,14 @@ DEMAND_ROWS = (
      "days_ahead": 3},
 )
 
-# Harga referensi telur (docs/Skill.md §11) — sinyal harga di titik baku demo.
+# Harga referensi telur (`app/db_seed.py`) — sinyal harga di titik baku demo.
 REFERENCE_PRICE_PER_KG = Decimal("26500.00")
 
-# Kode batch: B-2026-0101, 0102, … (0101/0102 = angka §11). Nomor urut mengikuti SUPPLY_ROWS.
+# Kode batch: B-2026-0101, 0102, … (0101/0102 = angka baku demo). Nomor urut mengikuti SUPPLY_ROWS.
 BATCH_CODE_PREFIX = "B-2026-"
 FIRST_BATCH_NUMBER = 101
 
-# Atribut batch yang tidak ada di §11 (kesegaran, suhu, sertifikasi) adalah placeholder demo dan
+# Atribut batch yang tidak ada di angka baku demo (kesegaran, suhu, sertifikasi) adalah placeholder demo dan
 # WAJIB tetap ditandai sebagai data simulasi di UI (lihat deviasi #18).
 BATCH_CERTIFICATION = "hygiene"
 BATCH_FRESHNESS_SCORE = Decimal("0.95")
@@ -256,7 +258,7 @@ BATCH_HARVESTED_DAYS_AGO = 2
 # Suhu normal batch segar yang disimpan dingin (< 4 °C, `frontend/lib/ccp.ts`).
 BATCH_BASE_TEMPERATURE_C = Decimal("2.0")
 
-# Akun demo (docs/Skill.md §9: 6 akun — head + nutritionist Jakarta & Cianjur, 2 monitor BGN).
+# Akun demo (`docs/Schema.md` §3: 6 akun — head + nutritionist Jakarta & Cianjur, 2 monitor BGN).
 #
 # Email TIGA akun pertama SENGAJA sama dengan yang tertulis di halaman login demo
 # (`frontend/lib/demo-accounts.ts`, docs/design.md §1.5). Sebelumnya seed ini memakai
@@ -264,10 +266,11 @@ BATCH_BASE_TEMPERATURE_C = Decimal("2.0")
 # `NEXT_PUBLIC_USE_MOCK=false` — email itu tidak ada di database. Dokumen yang menang
 # (tampilan mengikuti design.md), jadi seed ini yang menyesuaikan, bukan UI-nya.
 #
-# CATATAN (perlu keputusan Roy): §9 menyebut akun demo untuk Jakarta dan Bogor. Jakarta ada di sini;
-# Bogor BELUM, karena Bogor tidak ada di dataset §11 (Cianjur surplus, Jakarta kekurangan) sehingga
-# lokasinya belum ada dan stok/demand-nya akan kosong — lebih baik akunnya menyusul bersama datanya
-# daripada membuat lokasi tanpa isi. Cianjur ditambahkan (additive) karena ia SPPG asal di dataset.
+# CATATAN (perlu keputusan Roy): dokumen revisi 9 Okt tidak lagi mencantumkan daftar akun demo.
+# Yang ada di sini mengikuti kebutuhan demo: Jakarta (tujuan) + Cianjur (asal).
+# Bogor BELUM dibuat karena tidak ada di dataset angka baku demo (Cianjur surplus, Jakarta kurang)
+# sehingga lokasinya belum ada dan stok/demand-nya akan kosong — lebih baik akunnya menyusul bersama
+# datanya daripada membuat lokasi tanpa isi.
 UI_DEMO_EMAILS = (
     "sppg.head@demo.local",
     "sppg.nutritionist@demo.local",
@@ -427,8 +430,8 @@ def seed_demo_data(session: Session) -> dict[str, int]:
     session.execute(delete(Batch))
     now = datetime.now(timezone.utc)
     supplier_ids = {row.name: row.id for row in session.scalars(select(Supplier)).all()}
-    # Empat titik pertama memakai pemasok §11 apa adanya; titik tambahan memakai Supplier B
-    # (menambah pemasok baru berarti mengubah Skill.md §11 — keputusan dokumen, bukan implementasi).
+    # Empat titik pertama memakai pemasok dari angka baku demo apa adanya; titik tambahan memakai Supplier B
+    # (menambah pemasok baru berarti mengubah `app/db_seed.py` — keputusan dokumen, bukan implementasi).
     supplier_by_location = {
         "Cianjur": "Supplier A",
         "Jakarta": "Supplier C",
@@ -461,12 +464,15 @@ def seed_demo_data(session: Session) -> dict[str, int]:
                     location_id=location_ids[spec["location"]],  # type: ignore[arg-type]
                     supplier_id=supplier_ids[supplier_name],
                     quantity_kg=quantity,
-                    harvested_at=now - timedelta(days=BATCH_HARVESTED_DAYS_AGO),
+                    # `batches.usable_until` dihapus dari skema (9 Okt), jadi yang disetel adalah
+                    # waktu panen; batas layak pakainya diturunkan (`core/shelf_life.py`).
+                    # Angka `freshness_hours` seed tetap berarti "layak sampai now + N jam".
+                    harvested_at=now
+                    + timedelta(hours=spec["freshness_hours"] - DEFAULT_SHELF_LIFE_HOURS),
                     temperature_log=_temperature_log(now, spec["temperature_c"]),
                     certification_status=BATCH_CERTIFICATION,
                     freshness_score=_freshness_score(spec["freshness_hours"]),
                     safety_status=spec["safety"],
-                    usable_until=now + timedelta(hours=spec["freshness_hours"]),
                 )
             )
 
@@ -487,19 +493,19 @@ def seed_demo_data(session: Session) -> dict[str, int]:
 
     session.execute(delete(PriceSignal))
     for spec in SUPPLY_ROWS:
+        # Kuotasi pemasok hanya masuk akal kalau lokasi itu memang punya pemasok — `price_signals`
+        # mensyaratkan `supplier_id` terisi untuk source='supplier_quote' (docs/Schema.md §2,
+        # ditegakkan CHECK constraint). Titik tanpa pemasok memakai harga acuan pasar (PIHPS).
+        quote_supplier = supplier_by_location.get(spec["location"])
+        is_reference = spec["price_per_kg"] == REFERENCE_PRICE_PER_KG or quote_supplier is None
         session.add(
             PriceSignal(
                 location_id=location_ids[spec["location"]],  # type: ignore[arg-type]
                 commodity_id=commodity_ids[spec["commodity"]],  # type: ignore[arg-type]
                 price_per_kg=spec["price_per_kg"],
                 recorded_at=now,
-                # §11 menetapkan satu harga referensi pasar untuk telur; harga titik tambahan
-                # adalah kuotasi lokal, jadi sumbernya dibedakan (Schema.md §2 `price_signals.source`).
-                source=(
-                    "pihps_reference"
-                    if spec["price_per_kg"] == REFERENCE_PRICE_PER_KG
-                    else "supplier_quote"
-                ),
+                source="pihps_reference" if is_reference else "supplier_quote",
+                supplier_id=None if is_reference else supplier_ids[quote_supplier],  # type: ignore[index]
             )
         )
 

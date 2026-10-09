@@ -1,6 +1,7 @@
 """Test aturan approval — logika murni, tanpa HTTP dan tanpa database.
 
-Sumber aturan: `docs/Skill.md` §9 (approval matrix) + `docs/Schema.md` §6 (catatan integritas).
+Sumber aturan: `docs/Schema.md` §3 (kontrak status) & §6 (catatan integritas) dan
+`docs/PRD.md` §5 ("approver SPPG approve atau reject").
 Ditulis sebelum implementasi ada, supaya yang diuji adalah aturan dokumen, bukan kode yang sudah jadi.
 """
 
@@ -58,11 +59,19 @@ def _validate(**overrides):
 def test_required_approvals_matches_approval_matrix():
     assert required_approvals("pending_approval") == 1
     assert required_approvals("verifier_flagged") == 2
-    assert required_approvals("verifier_unavailable") == 2
+
+
+@pytest.mark.parametrize("status", ["verifier_unavailable", "expired"])
+def test_statuses_dropped_on_9_okt_are_no_longer_approvable(status):
+    """`verifier_unavailable` dan `expired` dihapus dari kontrak status (docs/Schema.md §3,
+    revisi 9 Okt) — keduanya sekarang ditolak sebagai status yang tidak menunggu approval."""
+    with pytest.raises(ApprovalRuleError) as exc:
+        required_approvals(status)
+    assert exc.value.code == "decision_not_approvable"
 
 
 @pytest.mark.parametrize(
-    "status", ["proposed", "approved", "rejected", "executed", "expired", "status_karangan"]
+    "status", ["proposed", "approved", "rejected", "executed", "status_karangan"]
 )
 def test_required_approvals_rejects_status_that_is_not_awaiting_approval(status):
     with pytest.raises(ApprovalRuleError) as exc:
@@ -73,7 +82,6 @@ def test_required_approvals_rejects_status_that_is_not_awaiting_approval(status)
 def test_both_roles_are_required_only_when_two_approvals_are_needed():
     assert required_roles("pending_approval") == frozenset()
     assert required_roles("verifier_flagged") == frozenset({HEAD, NUTRITIONIST})
-    assert required_roles("verifier_unavailable") == frozenset({HEAD, NUTRITIONIST})
 
 
 # --- siapa yang sah approve -------------------------------------------------------------
@@ -135,13 +143,12 @@ def test_single_approval_is_enough_when_verifier_is_consistent():
     assert is_satisfied("pending_approval", [_vote()]) is True
 
 
-@pytest.mark.parametrize("status", ["verifier_flagged", "verifier_unavailable"])
-def test_two_votes_from_the_same_role_do_not_satisfy_flagged_decision(status):
+def test_two_votes_from_the_same_role_do_not_satisfy_flagged_decision():
     """Dua 'sppg_head' bukan dua approval: yang kedua peran itu memang tidak pernah mulai."""
     votes = [_vote(HEAD_ID), _vote(uuid.UUID(int=7))]
 
-    assert is_satisfied(status, votes) is False
-    assert missing_roles(status, votes) == frozenset({NUTRITIONIST})
+    assert is_satisfied("verifier_flagged", votes) is False
+    assert missing_roles("verifier_flagged", votes) == frozenset({NUTRITIONIST})
 
 
 def test_head_and_nutritionist_satisfy_flagged_decision():

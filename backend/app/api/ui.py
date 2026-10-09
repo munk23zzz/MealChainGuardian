@@ -53,15 +53,13 @@ from app.models import (
 from app.api.actions import (
     ApproveRequest,
     ExecuteRequest,
-    ReceiveRequest,
     approve,
     execute,
     get_decision_or_404,
-    receive,
 )
 from app.api.supply import get_provider
 from app.core.kpi import DecisionFact, PriceFact, compute_kpi
-from app.core.learn import DeliveryEvent, replay_reliability
+from app.core.shelf_life import usable_until as derive_usable_until
 from app.sap_integration.field_mapping import PLANT_CODE_BY_LOCATION
 from app.sap_integration.provider_interface import SAPDataProvider
 
@@ -81,7 +79,6 @@ EvidenceType = Literal[
     "market_price",
 ]
 DecisionType = Literal["regional_balance", "price_anomaly", "safety_disruption"]
-Outcome = Literal["pending", "success", "failure"]
 
 EVIDENCE_LABELS: dict[str, str] = {
     "sap_purchase_order": "SAP — purchase order",
@@ -158,35 +155,6 @@ class SupplierOut(BaseModel):
     name: str
     location_id: str = Field(serialization_alias="locationId")
     reliability_score: float = Field(serialization_alias="reliabilityScore")
-
-
-class SupplierHistoryOut(BaseModel):
-    """`SupplierHistory` di `frontend/lib/api/schema.d.ts` (design.md §3.9c).
-
-    Skor di-replay dari penerimaan yang sudah diputuskan; UI tidak pernah menghitung skor sendiri.
-    """
-
-    supplier_id: str = Field(serialization_alias="supplierId")
-    current_score: float = Field(serialization_alias="currentScore")
-    points: list["SupplierScorePointOut"]
-    events: list["SupplierDeliveryEventOut"]
-
-
-class SupplierScorePointOut(BaseModel):
-    at: datetime | None
-    score: float
-    outcome: str | None
-    is_incident: bool = Field(serialization_alias="isIncident")
-    decision_id: str | None = Field(default=None, serialization_alias="decisionId")
-
-
-class SupplierDeliveryEventOut(BaseModel):
-    at: datetime
-    outcome: str
-    decision_id: str = Field(serialization_alias="decisionId")
-    commodity_id: str = Field(serialization_alias="commodityId")
-    quantity_kg: float = Field(serialization_alias="quantityKg")
-    note: str | None = None
 
 
 class CostCandidateOut(BaseModel):
@@ -315,7 +283,6 @@ class RecommendationOut(BaseModel):
     approved_at: datetime | None = Field(default=None, serialization_alias="approvedAt")
     expires_at: datetime | None = Field(default=None, serialization_alias="expiresAt")
     executed_at: datetime | None = Field(default=None, serialization_alias="executedAt")
-    outcome: Outcome | None = None
     sap_purchase_order: SapPurchaseOrderOut | None = Field(
         default=None, serialization_alias="sapPurchaseOrder"
     )
@@ -404,9 +371,15 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
             Batch.quantity_kg,
             Batch.safety_status,
             Batch.temperature_log,
-            Batch.usable_until,
+            Batch.harvested_at,
         )
     ).all()
+
+    # `batches.usable_until` dihapus dari skema (9 Okt); batas layak pakai diturunkan dari
+    # waktu panen + masa layak komoditas (`core/shelf_life.py`).
+    commodity_names = {
+        row.id: row.name for row in session.scalars(select(Commodity)).all()
+    }
 
     physical: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
     usable: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
@@ -415,10 +388,11 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
     earliest: dict[tuple[uuid.UUID, uuid.UUID], datetime | None] = {}
     excursion: dict[tuple[uuid.UUID, uuid.UUID], bool] = {}
 
-    for location_id, commodity_id, quantity_kg, safety_status, temperature_log, usable_until in rows:
+    for location_id, commodity_id, quantity_kg, safety_status, temperature_log, harvested_at in rows:
         key = (location_id, commodity_id)
         quantity = _decimal(quantity_kg)
-        expired = usable_until is not None and usable_until <= now
+        batch_usable_until = derive_usable_until(harvested_at, commodity_names.get(commodity_id))
+        expired = batch_usable_until <= now
 
         physical[key] = physical.get(key, Decimal(0)) + quantity
         usable.setdefault(key, Decimal(0))
@@ -426,8 +400,8 @@ def _supply_by_pair(session: Session, now: datetime) -> dict[tuple[uuid.UUID, uu
         statuses.setdefault(key, []).append(safety_status)
 
         current_earliest = earliest.get(key)
-        if usable_until is not None and (current_earliest is None or usable_until < current_earliest):
-            earliest[key] = usable_until
+        if current_earliest is None or batch_usable_until < current_earliest:
+            earliest[key] = batch_usable_until
         if has_temperature_excursion(temperature_log):
             excursion[key] = True
 
@@ -611,7 +585,11 @@ def list_demand(session: SessionDep, _user: CurrentUser) -> list[DemandOut]:
 
 @router.get("/suppliers", response_model=list[SupplierOut])
 def list_suppliers(session: SessionDep, _user: CurrentUser) -> list[SupplierOut]:
-    """Pemasok + skor kepercayaan terkini (diperbarui lewat LEARN, Skill.md §10)."""
+    """Pemasok + skor kepercayaan (`suppliers.reliability_score`, docs/Schema.md §1).
+
+    Skor TIDAK lagi dihitung ulang dari riwayat pengiriman — mekanisme LEARN dihapus bersama
+    `decisions.outcome` (revisi dokumen 9 Okt), jadi nilainya statis dari seed.
+    """
     rows = session.scalars(select(Supplier).order_by(Supplier.name)).all()
     return [
         SupplierOut(
@@ -876,7 +854,6 @@ def build_recommendation(
         approved_at=approved_at,
         expires_at=decision.expires_at,
         executed_at=executed_at,
-        outcome=decision.outcome,  # type: ignore[arg-type]
         sap_purchase_order=_purchase_order(session, decision),
         agent_trace=[
             AgentStepOut(
@@ -986,117 +963,6 @@ def get_kpi(session: SessionDep, _user: CurrentUser) -> KpiSnapshotOut:
     return KpiSnapshotOut(**values, unavailable=unavailable)
 
 
-# --- Riwayat pemasok (design.md §3.9c) ---------------------------------------------------------
-
-#: Schema.md §1: `suppliers.reliability_score` DEFAULT 0,80 — skor sebelum ada penerimaan.
-DEFAULT_RELIABILITY = Decimal("0.80")
-
-
-def _decided_deliveries(
-    session: Session, supplier_id: uuid.UUID
-) -> list[tuple[Decision, SapMockPurchaseOrder, datetime, str | None]]:
-    """Penerimaan pemasok ini yang sudah punya hasil (success/failure), urut waktu.
-
-    Yang menjadi penanda waktu: bukti inspeksi penerimaan (`human_inspection.recorded_at`) kalau
-    ada — itu saat kondisi barang benar-benar dinilai; kalau belum ada, langkah ACT; terakhir
-    `decisions.created_at`.
-    """
-    rows = session.execute(
-        select(Decision, SapMockPurchaseOrder)
-        .join(SapMockPurchaseOrder, SapMockPurchaseOrder.decision_id == Decision.id)
-        .where(SapMockPurchaseOrder.supplier_id == supplier_id)
-        .where(Decision.outcome.in_(("success", "failure")))
-    ).all()
-    if not rows:
-        return []
-
-    decision_ids = [decision.id for decision, _ in rows]
-    when: dict[uuid.UUID, datetime] = {}
-    notes: dict[uuid.UUID, str] = {}
-
-    for item in session.scalars(
-        select(DecisionEvidence)
-        .where(DecisionEvidence.decision_id.in_(decision_ids))
-        .where(DecisionEvidence.evidence_type == "human_inspection")
-        .order_by(DecisionEvidence.recorded_at)
-    ):
-        when.setdefault(item.decision_id, item.recorded_at)
-        payload = item.payload if isinstance(item.payload, dict) else {}
-        note = payload.get("note") or payload.get("physical_condition")
-        if note:
-            notes.setdefault(item.decision_id, str(note))
-
-    for trace in session.scalars(
-        select(AgentTrace)
-        .where(AgentTrace.decision_id.in_(decision_ids))
-        .where(AgentTrace.step_name == "ACT")
-        .order_by(AgentTrace.step_at)
-    ):
-        when.setdefault(trace.decision_id, trace.step_at)
-
-    decided = [
-        (decision, order, when.get(decision.id, decision.created_at), notes.get(decision.id))
-        for decision, order in rows
-    ]
-    return sorted(decided, key=lambda row: row[2])
-
-
-@router.get("/suppliers/{supplier_id}/history", response_model=SupplierHistoryOut)
-def get_supplier_history(
-    session: SessionDep, _user: CurrentUser, supplier_id: str
-) -> SupplierHistoryOut:
-    """Riwayat skor satu pemasok: replay LEARN dari penerimaan nyata (Skill.md §10).
-
-    Titik pertama adalah skor awal 0,80 (DEFAULT Schema.md §1), lalu setiap penerimaan
-    `success`/`failure` menggeser skor dengan formula yang sama seperti `frontend/lib/reliability.ts`.
-    Karena rumusnya deterministik, titik terakhir harus sama dengan `reliability_score` tersimpan —
-    kalau tidak, ada kejadian yang tidak tersimpan PO-nya.
-    """
-    try:
-        parsed = uuid.UUID(supplier_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"id pemasok bukan UUID: {supplier_id!r}") from None
-
-    supplier = session.get(Supplier, parsed)
-    if supplier is None:
-        raise HTTPException(status_code=404, detail=f"Pemasok tidak ditemukan: {supplier_id}")
-
-    deliveries = _decided_deliveries(session, supplier.id)
-    points = replay_reliability(
-        DEFAULT_RELIABILITY,
-        [
-            DeliveryEvent(at=at, outcome=decision.outcome or "", decision_id=str(decision.id))
-            for decision, _, at, _ in deliveries
-        ],
-    )
-
-    return SupplierHistoryOut(
-        supplier_id=str(supplier.id),
-        current_score=float(supplier.reliability_score),
-        points=[
-            SupplierScorePointOut(
-                at=point.at,
-                score=float(point.score),
-                outcome=point.outcome,
-                is_incident=point.is_incident,
-                decision_id=point.decision_id,
-            )
-            for point in points
-        ],
-        events=[
-            SupplierDeliveryEventOut(
-                at=at,
-                outcome=decision.outcome or "",
-                decision_id=str(decision.id),
-                commodity_id=str(decision.commodity_id or ""),
-                quantity_kg=float(decision.quantity_kg or 0),
-                note=note,
-            )
-            for decision, _, at, note in deliveries
-        ],
-    )
-
-
 # --- Aksi dari UI: kontrak tulis versi UI ------------------------------------------------------
 #
 # Kenapa ada jalur tulis terpisah: UI mengirim camelCase dan tanpa pemilih pemasok (`{decisionId}`
@@ -1118,23 +984,6 @@ class UiRejectRequest(UiDecisionRequest):
     """Penolakan = satu suara `approved=False` + alasan sebagai komentar audit."""
 
     reason: str | None = None
-
-
-class UiReceiveRequest(UiDecisionRequest):
-    measured_temp_c: Decimal | None = Field(default=None, alias="measuredTempC")
-    physical_condition: Literal["baik", "rusak_sebagian", "rusak"] = Field(
-        alias="physicalCondition"
-    )
-    note: str | None = None
-
-
-class ReceivingInspectionOut(BaseModel):
-    """`ReceivingInspectionResult` di `frontend/lib/api/schema.d.ts`."""
-
-    decision: RecommendationOut
-    evidence_id: str = Field(serialization_alias="evidenceId")
-    outcome: str
-    affects_supplier_reliability: bool = Field(serialization_alias="affectsSupplierReliability")
 
 
 def _execute_defaults(session: Session, decision: Decision) -> tuple[str, Decimal]:
@@ -1238,38 +1087,4 @@ def ui_execute(
     )
     return build_recommendation(
         session, get_decision_or_404(session, payload.decision_id), _now()
-    )
-
-
-@router.post("/actions/receive", response_model=ReceivingInspectionOut)
-def ui_receive(
-    payload: UiReceiveRequest,
-    session: SessionDep,
-    user: CurrentUser,
-    provider: Annotated[SAPDataProvider, Depends(get_provider)],
-) -> ReceivingInspectionOut:
-    """Catat penerimaan dari UI; aturan siapa/kapan boleh mencatat tetap di `core/receiving_rules.py`."""
-    response = receive(
-        ReceiveRequest(
-            decision_id=payload.decision_id,
-            physical_condition=payload.physical_condition,
-            measured_temperature_c=payload.measured_temp_c,
-            notes=payload.note,
-        ),
-        session,
-        user,
-        provider,
-    )
-    decision = get_decision_or_404(session, payload.decision_id)
-    evidence = session.scalar(
-        select(DecisionEvidence)
-        .where(DecisionEvidence.decision_id == decision.id)
-        .where(DecisionEvidence.evidence_type == "human_inspection")
-        .order_by(DecisionEvidence.recorded_at.desc())
-    )
-    return ReceivingInspectionOut(
-        decision=build_recommendation(session, decision, _now()),
-        evidence_id=str(evidence.id) if evidence is not None else "",
-        outcome=response.outcome,
-        affects_supplier_reliability=response.outcome == "failure",
     )

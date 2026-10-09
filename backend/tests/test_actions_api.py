@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from api_support import (
     CIANJUR_HEAD,
@@ -128,28 +128,30 @@ def test_same_person_cannot_approve_twice(client, db_factory):
     assert again.json()["detail"]["error"] == "decision_not_approvable"
 
 
-def test_unique_index_blocks_a_second_vote_from_the_same_person_in_the_database(
-    client, db_factory
-):
-    """Aturan yang sama juga ditegakkan database, bukan hanya kode Python (defense in depth)."""
-    from sqlalchemy.exc import IntegrityError
-
+def test_second_vote_from_the_same_person_is_rejected_in_the_domain(client, db_factory):
+    """Unique index `(decision_id, approved_by)` DILEPAS dari skema (docs/Schema.md §3, revisi
+    9 Okt). Aturan "satu orang sekali" tetap berlaku, tapi sekarang ditegakkan domain
+    (`core/approval_rules.py` → kode `duplicate_approver`), bukan constraint database.
+    Tes ini menjaga aturannya tidak hilang bersama indexnya.
+    """
     headers = _headers(client, JAKARTA_HEAD)
-    decision_id = propose(client, headers).json()["decision"]["id"]
+    # `verifier_flagged` butuh DUA approval, jadi statusnya masih menunggu setelah vote pertama —
+    # di situlah aturan "satu orang sekali" benar-benar diuji (bukan sekadar status sudah berubah).
+    decision_id = propose(client, headers, verifier_result="flagged").json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
 
+    second = approve(client, headers, decision_id)
+    assert second.status_code == 409
+    assert second.json()["detail"]["error"] == "duplicate_approver"
+
+    # dan tidak ada baris kedua yang benar-benar tertulis
     with db_factory() as session:
-        session.add(
-            Approval(
-                decision_id=decision_id,
-                approved_by=session.scalar(select(User.id).where(User.email == JAKARTA_HEAD)),
-                approver_role="sppg_head",
-                approved=True,
-                approved_at=datetime.now(timezone.utc),
-            )
+        count = session.scalar(
+            select(func.count())
+            .select_from(Approval)
+            .where(Approval.decision_id == decision_id)
         )
-        with pytest.raises(IntegrityError):
-            session.commit()
+    assert count == 1
 
 
 # --- approve: berapa approval ---------------------------------------------------------
@@ -261,7 +263,6 @@ def test_execute_after_approval_creates_purchase_order_and_trace(client, db_fact
     assert isinstance(body["purchase_order"]["order_quantity"], (int, float))
     assert isinstance(body["purchase_order"]["net_price_amount"], (int, float))
     assert body["decision"]["status"] == "executed"
-    assert body["decision"]["outcome"] == "pending"
 
     with db_factory() as session:
         evidence = session.execute(
@@ -321,9 +322,10 @@ def test_expired_decision_cannot_be_approved_or_executed(client, db_factory, sup
     assert approve_response.status_code == 409
     assert approve_response.json()["detail"]["error"] == "decision_expired"
 
-    # status benar-benar dipindahkan, bukan hanya ditolak di permukaan
+    # Status TIDAK dipindahkan: `expired` sudah bukan status tersimpan (docs/Schema.md §3,
+    # revisi 9 Okt) — kedaluwarsa diturunkan dari `expires_at` saat dibaca.
     after = client.get(f"/decisions/{decision_id}").json()
-    assert after["status"] == "expired"
+    assert after["status"] == "pending_approval"
 
     execute_response = execute(client, headers, decision_id, supplier_id)
     assert execute_response.status_code == 409

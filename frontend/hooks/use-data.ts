@@ -8,7 +8,6 @@ import {
   getDemand,
   getKpi,
   getLocations,
-  getSupplierHistory,
   getSuppliers,
   getSupply,
 } from "@/lib/api";
@@ -78,14 +77,5 @@ export function useSuppliers() {
     queryKey: ["suppliers"],
     queryFn: getSuppliers,
     refetchInterval: POLL_INTERVAL,
-  });
-}
-
-/** Riwayat penerimaan satu pemasok — dasar grafik "sebelum/sesudah insiden". */
-export function useSupplierHistory(supplierId: string) {
-  return useQuery({
-    queryKey: ["supplier-history", supplierId],
-    queryFn: () => getSupplierHistory(supplierId),
-    enabled: Boolean(supplierId),
   });
 }

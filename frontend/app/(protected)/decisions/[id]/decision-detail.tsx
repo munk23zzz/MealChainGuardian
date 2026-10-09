@@ -94,7 +94,6 @@ export default function DecisionDetailPage() {
   const actionable =
     decision.status === "pending_approval" ||
     decision.status === "verifier_flagged" ||
-    decision.status === "verifier_unavailable" ||
     decision.status === "approved";
 
   return (

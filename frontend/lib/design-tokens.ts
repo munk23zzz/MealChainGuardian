@@ -164,26 +164,20 @@ export function safetyStatusTone(status: SafetyStatus): Tone {
 const DECISION_TONES: Record<DecisionStatusKey, Tone> = {
   proposed: "neutral",
   verifier_flagged: "danger",
-  // Perlu 2 approval (Skill.md §9) tapi bukan kegagalan data seperti flagged.
-  verifier_unavailable: "warning",
+  // Perlu 2 approval (Schema.md §3): satu Kepala SPPG + satu Ahli Gizi penerima.
   pending_approval: "warning",
   approved: "safe",
   rejected: "danger",
   executed: "info",
-  // Lewat `expires_at`: tidak bisa dieksekusi lagi (Schema.md §6). Abu-abu
-  // karena ini keadaan riwayat, bukan alarm — merah dicadangkan untuk FAIL/flag.
-  expired: "neutral",
 };
 
 const DECISION_LABELS: Record<DecisionStatusKey, string> = {
   proposed: "Diusulkan",
   verifier_flagged: "Ditandai Verifier",
-  verifier_unavailable: "Verifier tidak tersedia",
   pending_approval: "Menunggu approval",
   approved: "Disetujui",
   rejected: "Ditolak",
   executed: "Dieksekusi",
-  expired: "Kedaluwarsa",
 };
 
 export function decisionStatusColor(status: DecisionStatusKey): string {
@@ -201,12 +195,10 @@ export function decisionStatusTone(status: DecisionStatusKey): Tone {
 const DECISION_STATUS_VALUES: DecisionStatusKey[] = [
   "proposed",
   "verifier_flagged",
-  "verifier_unavailable",
   "pending_approval",
   "approved",
   "rejected",
   "executed",
-  "expired",
 ];
 
 /**

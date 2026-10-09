@@ -127,21 +127,10 @@ describe("decisionStatus", () => {
   it("semua status dari Schema.md §3 punya label Bahasa Indonesia", () => {
     expect(decisionStatusLabel("proposed")).toBe("Diusulkan");
     expect(decisionStatusLabel("verifier_flagged")).toBe("Ditandai Verifier");
-    expect(decisionStatusLabel("verifier_unavailable")).toBe(
-      "Verifier tidak tersedia",
-    );
     expect(decisionStatusLabel("pending_approval")).toBe("Menunggu approval");
     expect(decisionStatusLabel("approved")).toBe("Disetujui");
     expect(decisionStatusLabel("rejected")).toBe("Ditolak");
     expect(decisionStatusLabel("executed")).toBe("Dieksekusi");
-    expect(decisionStatusLabel("expired")).toBe("Kedaluwarsa");
-  });
-
-  it("kedaluwarsa tampil netral (riwayat), bukan merah alarm", () => {
-    expect(decisionStatusColor("expired")).toBe(PALETTE.grey500);
-    expect(decisionStatusColor("verifier_unavailable")).toBe(
-      PALETTE.statusWarning,
-    );
   });
 });
 

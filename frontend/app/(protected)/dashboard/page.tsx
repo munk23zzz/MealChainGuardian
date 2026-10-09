@@ -191,17 +191,15 @@ export default function DashboardPage() {
   );
 
   /**
-   * Keputusan yang benar-benar menunggu tindakan manusia. `verifier_flagged` DAN
-   * `verifier_unavailable` sama-sama butuh 2 approval (Schema.md §6), jadi
-   * keduanya masuk hitungan — bukan cuma yang statusnya pending.
+   * Keputusan yang benar-benar menunggu tindakan manusia: `verifier_flagged`
+   * (perlu 2 approval, Schema.md §3) dan `pending_approval` yang butuh 1.
    */
   const actionable = useMemo(
     () =>
       scopedDecisions.filter(
         (d) =>
           d.status === "pending_approval" ||
-          d.status === "verifier_flagged" ||
-          d.status === "verifier_unavailable",
+          d.status === "verifier_flagged",
       ),
     [scopedDecisions],
   );

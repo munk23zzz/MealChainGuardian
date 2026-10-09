@@ -1,7 +1,7 @@
-"""Pembantu test API — dipakai `test_actions_api.py` dan `test_receive_api.py`.
+"""Pembantu test API — dipakai `test_actions_api.py`.
 
-Permintaan-permintaan demo (propose/approve/execute/receive) dan identitas akun demo tinggal di
-satu tempat supaya kedua file test tidak menyimpang satu sama lain.
+Permintaan-permintaan demo (propose/approve/execute) dan identitas akun demo tinggal di satu
+tempat supaya file test tidak menyimpang satu sama lain.
 """
 
 from __future__ import annotations
@@ -98,18 +98,8 @@ def execute(client, headers, decision_id: str, supplier: str, net_price: float =
     )
 
 
-def receive(client, headers, decision_id: str, condition: str = "baik", **extra: Any):
-    body: dict[str, Any] = {
-        "decision_id": decision_id,
-        "physical_condition": condition,
-        "measured_temperature_c": 4.0,
-    }
-    body.update(extra)
-    return client.post("/actions/receive", json=body, headers=headers)
-
-
 def approved_decision(client, headers, supplier: str, **propose_overrides: Any) -> str:
-    """Keputusan yang sudah dieksekusi — titik awal yang dibutuhkan inspeksi penerimaan."""
+    """Keputusan yang sudah dieksekusi — titik awal uji jalur aksi (dan pembuatan PO)."""
     decision_id = propose(client, headers, **propose_overrides).json()["decision"]["id"]
     assert approve(client, headers, decision_id).status_code == 200
     response = execute(client, headers, decision_id, supplier)

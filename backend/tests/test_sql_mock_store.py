@@ -6,7 +6,7 @@ penomoran PO bertahan lintas instance, dan bahwa kolom ber-FK menolak nilai asal
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -131,7 +131,11 @@ def test_decision_reference_must_be_a_real_decision_uuid(provider):
 
 def test_decision_reference_links_purchase_order_to_decision(provider, session):
     supplier = provider.get_business_partner()[0].BusinessPartner
-    decision = Decision(decision_type="regional_balance")
+    decision = Decision(
+        decision_type="regional_balance",
+        # `expires_at` NOT NULL sejak revisi 9 Okt (docs/Schema.md §3).
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
+    )
     session.add(decision)
     session.commit()
 

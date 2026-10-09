@@ -33,7 +33,7 @@ def get_current_user(
     serta belum kedaluwarsa. Sebelumnya identitas datang dari header `X-User-Id` yang tidak
     diverifikasi (deviasi #9) — jalur itu sudah dihapus supaya tidak ada cara menyamar.
 
-    Yang tetap ditegakkan di lapisan ini juga: peran & lokasi approver (`docs/Skill.md` §9), bukan di UI.
+    Yang tetap ditegakkan di lapisan ini juga: peran & lokasi approver (`docs/Schema.md` §3 & §6, `docs/PRD.md` §5), bukan di UI.
     """
     if not authorization:
         raise HTTPException(

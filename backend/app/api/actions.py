@@ -1,17 +1,21 @@
 """Endpoint aksi — `POST /actions/propose|approve|execute`.
 
-Aturan yang ditegakkan DI SINI (bukan di UI) — `docs/Skill.md` §9 dan `docs/Schema.md` §6:
+Aturan yang ditegakkan DI SINI (bukan di UI) — `docs/Schema.md` §3 & §6 dan `docs/PRD.md` §5:
 
 1. **Tidak ada auto-execute.** `executed` hanya bisa dicapai kalau sudah ada approval yang sah
    (`decisions.status == 'approved'`). Tidak ada jalur `proposed -> executed`.
-2. **Siapa yang sah approve berapa kali** ditentukan `core/approval_rules.py`: 1 approval untuk
-   `pending_approval`, 2 (head DAN nutritionist dari SPPG penerima) untuk `verifier_flagged` /
-   `verifier_unavailable`. `bgn_monitor` tidak pernah bisa approve.
-3. **Masa berlaku.** Keputusan yang lewat `expires_at` tidak bisa di-approve maupun dieksekusi;
-   statusnya dipindahkan ke `expired` saat itu terdeteksi.
+2. **Siapa yang sah approve.** Ditegakkan `core/approval_rules.py`: approver harus peran SPPG
+   (`sppg_head`/`sppg_nutritionist`) dari SPPG penerima; 1 approval cukup untuk
+   `pending_approval`, 2 (head DAN nutritionist) untuk `verifier_flagged`. `bgn_monitor` tidak
+   pernah bisa approve.
+3. **Masa berlaku.** `decisions.expires_at` WAJIB terisi (`docs/Schema.md` §3, keputusan Roy
+   2026-10-05) dan keputusan yang lewat batas itu tidak bisa di-approve maupun dieksekusi.
+   Kedaluwarsa bersifat TURUNAN dari waktu — status `expired` sudah dihapus dari kontrak, jadi
+   tidak ada penulisan status saat batas terlewat (`docs/Schema.md` §3, revisi 9 Okt).
 
-`POST /actions/receive` (inspeksi penerimaan + LEARN, `docs/Architecture.md` §4) belum ada di sini —
-itu langkah berikutnya, bersama pembaruan `reliability_score` (`docs/Skill.md` §10).
+Inspeksi penerimaan (`/actions/receive`) dan pembaruan `reliability_score` sudah TIDAK ada:
+revisi dokumen 9 Okt menghapus `decisions.outcome` dan langkah penerimaan dari desain
+(`docs/Skill.md` §5, `docs/design.md` §3).
 
 Batasan yang diketahui (dinyatakan, bukan disembunyikan):
 
@@ -26,9 +30,9 @@ Batasan yang diketahui (dinyatakan, bukan disembunyikan):
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Annotated, Any, Iterator, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -53,12 +57,6 @@ from app.core.approval_rules import (
     required_approvals,
     validate_vote,
 )
-from app.core.learn import LEARN_WINDOW, adjusted_reliability
-from app.core.receiving_rules import (
-    ReceivingRuleError,
-    outcome_for_condition,
-    validate_receiving,
-)
 from app.models import (
     AgentTrace,
     Approval,
@@ -66,9 +64,7 @@ from app.models import (
     Decision,
     DecisionEvidence,
     Location,
-    SapMockPurchaseOrder,
     Supplier,
-    User,
 )
 from app.sap_integration.field_mapping import MATERIAL_NUMBER_BY_COMMODITY
 from app.sap_integration.provider_interface import (
@@ -80,14 +76,21 @@ from app.sap_integration.provider_interface import (
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
-# Verifier belum diimplementasikan (SAP AI Core, P2.3). Sampai itu ada, hasil verifikasi diberikan
+# Verifier Agent belum dibangun di repo ini (P2.3). Sampai itu ada, hasil verifikasi diberikan
 # pemanggil (Supervisor agent) secara eksplisit; kalau tidak diberikan, keputusan TIDAK dianggap
-# terverifikasi dan karena itu tidak bisa di-approve.
+# terverifikasi dan karena itu tidak bisa di-approve. Status `verifier_unavailable` sudah dihapus
+# dari kontrak (docs/Schema.md §3), jadi verifier yang gagal diperlakukan seperti belum
+# terverifikasi: keputusan tetap `proposed` dan tidak bisa di-approve.
 VERIFIER_RESULT_TO_STATUS: dict[str, str] = {
     "consistent": "pending_approval",
     "flagged": "verifier_flagged",
-    "unavailable": "verifier_unavailable",
 }
+
+# Batas masa berlaku bawaan kalau pemanggil tidak menyebutkannya. `decisions.expires_at` NOT NULL
+# (docs/Schema.md §3), jadi nilai ini WAJIB ada. Angka 48 jam = SLA default; saat kandidat batch
+# nyata tersedia, batas sebenarnya adalah min(usable_until batch, SLA) seperti rumus lama
+# (`docs/Schema.md` §3 versi lama).
+DEFAULT_DECISION_VALIDITY_HOURS = 48
 
 # Aturan approval -> kode HTTP. 403 = kamu bukan approver yang sah; 409 = status keputusannya tidak
 # memungkinkan; 422 = data keputusan tidak lengkap untuk aturan ini.
@@ -107,7 +110,8 @@ def _now() -> datetime:
 
 
 def _is_expired(decision: Decision, now: datetime) -> bool:
-    return decision.expires_at is not None and now >= decision.expires_at
+    """Kedaluwarsa diturunkan dari `expires_at` (NOT NULL, `docs/Schema.md` §3)."""
+    return now >= decision.expires_at
 
 
 def _rule_error(exc: ApprovalRuleError) -> HTTPException:
@@ -174,7 +178,7 @@ class ProposeRequest(BaseModel):
     safe_delivered_cost: Decimal | None = Field(default=None, gt=0)
     cost_breakdown: dict[str, Any] | None = None
     expires_at: datetime | None = None
-    verifier_result: Literal["consistent", "flagged", "unavailable"] | None = Field(
+    verifier_result: Literal["consistent", "flagged"] | None = Field(
         default=None,
         description="Hasil verifikasi. Kosong = belum diverifikasi, keputusan tidak bisa di-approve.",
     )
@@ -207,10 +211,13 @@ def propose(
         else "proposed"
     )
 
+    now = _now()
     decision = Decision(
         decision_type=payload.decision_type,
         status=status,
-        expires_at=payload.expires_at,
+        # NOT NULL: kalau pemanggil tidak menyebut batasnya, pakai SLA bawaan.
+        expires_at=payload.expires_at
+        or now + timedelta(hours=DEFAULT_DECISION_VALIDITY_HOURS),
         proposed_by=payload.proposed_by,
         verified_by=payload.proposed_by if payload.verifier_result else None,
         verifier_note=payload.verifier_note,
@@ -273,15 +280,14 @@ def approve(
     decision = get_decision_or_404(session, payload.decision_id)
     now = _now()
 
-    if _is_expired(decision, now) and decision.status not in ("executed", "rejected", "expired"):
-        decision.status = "expired"
-        session.commit()
+    if _is_expired(decision, now) and decision.status not in ("executed", "rejected"):
         raise HTTPException(
             status_code=409,
             detail={
                 "error": "decision_expired",
-                "detail": f"Keputusan lewat masa berlaku pada {decision.expires_at}. Status dipindahkan "
-                "ke 'expired'; Supervisor harus mengulang dari DETECT (docs/Skill.md §9).",
+                "detail": f"Keputusan lewat masa berlaku pada {decision.expires_at.isoformat()} dan tidak "
+                "bisa di-approve. Kedaluwarsa kini diturunkan dari waktu, bukan status tersimpan "
+                "(docs/Schema.md §3) — Supervisor harus mengulang dari DETECT dengan data terbaru.",
             },
         )
 
@@ -300,13 +306,13 @@ def approve(
     except ApprovalRuleError as exc:
         raise _rule_error(exc) from None
 
-    # Peran approver diambil dari user yang sedang login (bukan dari payload) — dia snapshot untuk
-    # audit, dan `approvals_role_check` di database menolak nilai di luar daftar.
+    # Peran approver TIDAK lagi disimpan di baris approval: kolom `approvals.approver_role` dihapus
+    # dari skema (docs/Schema.md §3, revisi 9 Okt). Peran dibaca dari `users.role` saat validasi,
+    # dan siapa meng-approve tetap terlacak lewat `approved_by`.
     session.add(
         Approval(
             decision_id=decision.id,
             approved_by=user.id,
-            approver_role=user.role,
             approved=payload.approved,
             comment=payload.comment,
             approved_at=now,
@@ -391,14 +397,12 @@ def execute(
     now = _now()
 
     if _is_expired(decision, now):
-        if decision.status not in ("executed", "rejected", "expired"):
-            decision.status = "expired"
-            session.commit()
         raise HTTPException(
             status_code=409,
             detail={
                 "error": "decision_expired",
-                "detail": "Keputusan lewat masa berlaku; tidak pernah dieksekusi (docs/Skill.md §9).",
+                "detail": "Keputusan lewat masa berlaku; tidak pernah dieksekusi. Kedaluwarsa diturunkan "
+                "dari `expires_at`, bukan status tersimpan (docs/Schema.md §3).",
             },
         )
 
@@ -417,7 +421,7 @@ def execute(
                 "detail": (
                     f"Keputusan berstatus {decision.status!r} belum boleh dieksekusi. "
                     "Tidak ada auto-execute: PO hanya boleh dikirim setelah approval sah "
-                    "(docs/Skill.md §9)."
+                    "(docs/Schema.md §3)."
                 ),
                 "required_approvals": needed,
                 "approved_count": sum(1 for vote in votes if vote.approved),
@@ -463,7 +467,8 @@ def execute(
     )
 
     decision.status = "executed"
-    decision.outcome = "pending"
+    # `decisions.outcome` sudah dihapus dari skema (docs/Schema.md §3, revisi 9 Okt) — tidak ada
+    # lagi pencatatan hasil pengiriman di sisi ini.
 
     session.add(
         DecisionEvidence(
@@ -508,226 +513,6 @@ def execute(
     return ExecuteResponse(
         purchase_order=_serialize_purchase_order(po, provider),
         decision=build_decision_out(session, decision),
-    )
-
-
-# --- POST /actions/receive (Receiving Inspection, design.md §3.5b) -------------------------
-
-
-class ReceiveRequest(BaseModel):
-    decision_id: str
-    physical_condition: Literal["baik", "rusak_sebagian", "rusak"] = Field(
-        description="Kondisi fisik barang saat diterima; menentukan decisions.outcome"
-    )
-    measured_temperature_c: Decimal | None = Field(default=None, description="Suhu terukur (°C)")
-    delivered_quantity_kg: Decimal | None = Field(default=None, gt=0)
-    notes: str | None = None
-
-
-class SupplierScoreOut(BaseModel):
-    supplier: str
-    supplier_name: str
-    reliability_score_before: Quantity
-    reliability_score_after: Quantity
-    changed: bool
-    window: int
-    considered_outcomes: list[str]
-
-
-class ReceiveResponse(BaseModel):
-    decision: DecisionOut
-    outcome: str
-    supplier_score: SupplierScoreOut | None
-
-
-# Aturan penerimaan -> kode HTTP. 403 = bukan orang yang berhak mencatat; 409 = status keputusan
-# tidak memungkinkan; 422 = data keputusan tidak lengkap.
-RECEIVING_ERROR_TO_HTTP: dict[str, int] = {
-    "recorder_role_not_allowed": 403,
-    "recorder_location_mismatch": 403,
-    "decision_not_executed": 409,
-    "already_received": 409,
-    "decision_target_missing": 422,
-}
-
-
-def _receiving_error(exc: ReceivingRuleError) -> HTTPException:
-    return HTTPException(
-        status_code=RECEIVING_ERROR_TO_HTTP.get(exc.code, 409),
-        detail={"error": exc.code, "detail": exc.message},
-    )
-
-
-def _supplier_outcomes(session: Session, supplier_id: uuid.UUID) -> list[str | None]:
-    """Riwayat `outcome` keputusan yang PO-nya ke pemasok ini, urut lama -> baru.
-
-    Kenapa lewat PO: `decisions` tidak punya kolom `supplier_id` (`docs/Schema.md` §3), sedangkan
-    `sap_mock_purchase_orders` punya `supplier_id` DAN `decision_id` (§4). Jadi tautan
-    keputusan<->pemasok hanya ada di sisi SAP, dan LEARN membacanya dari sana.
-    """
-    rows = session.execute(
-        select(Decision.outcome)
-        .join(SapMockPurchaseOrder, SapMockPurchaseOrder.decision_id == Decision.id)
-        .where(SapMockPurchaseOrder.supplier_id == supplier_id, Decision.outcome.is_not(None))
-        .order_by(Decision.created_at)
-    ).scalars().all()
-    return list(rows)
-
-
-def _apply_learn(
-    session: Session,
-    *,
-    supplier_id: str,
-) -> tuple[SupplierScoreOut, int, list[str]]:
-    """Jalankan LEARN untuk satu pemasok. Mengembalikan ringkasan perubahan skor."""
-    try:
-        supplier_uuid = uuid.UUID(supplier_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Pemasok pada PO bukan UUID yang dikenal: {supplier_id!r}",
-        ) from None
-
-    supplier = session.get(Supplier, supplier_uuid)
-    if supplier is None:
-        raise HTTPException(
-            status_code=409, detail=f"Pemasok {supplier_id} tidak ada di tabel suppliers."
-        )
-
-    outcomes = _supplier_outcomes(session, supplier_uuid)
-    decided = [outcome for outcome in outcomes if outcome in ("success", "failure")]
-    before = Decimal(supplier.reliability_score)
-    after = adjusted_reliability(before, outcomes)
-
-    supplier.reliability_score = after
-
-    summary = SupplierScoreOut(
-        supplier=supplier_id,
-        supplier_name=supplier.name,
-        reliability_score_before=before,
-        reliability_score_after=after,
-        changed=after != before,
-        window=LEARN_WINDOW,
-        considered_outcomes=decided[-LEARN_WINDOW:],
-    )
-    return summary, len(decided), decided[-LEARN_WINDOW:]
-
-
-def _linked_purchase_order(provider: SAPDataProvider, decision: Decision) -> PurchaseOrderRecord:
-    """PO yang lahir dari keputusan ini. Tanpa PO, tidak ada pemasok yang bisa dinilai LEARN."""
-    linked = provider.get_purchase_orders(decision_reference=str(decision.id))
-    if not linked:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "purchase_order_missing",
-                "detail": (
-                    f"Keputusan {decision.id} berstatus executed tapi tidak punya purchase order "
-                    "tertaut, jadi pemasok penerima tidak bisa ditentukan untuk LEARN. Ini "
-                    "inkonsistensi data — periksa sap_mock_purchase_orders.decision_id."
-                ),
-            },
-        )
-    return linked[0]
-
-
-@router.post("/receive")
-def receive(
-    payload: ReceiveRequest,
-    session: SessionDep,
-    user: CurrentUser,
-    provider: Annotated[SAPDataProvider, Depends(get_provider)],
-) -> ReceiveResponse:
-    """Catat inspeksi penerimaan: bukti `human_inspection`, isi `decisions.outcome`, lalu LEARN.
-
-    LEARN dijalankan lewat `core/learn.py` (formula `docs/Skill.md` §10) — aritmetika deterministik,
-    bukan model yang dilatih ulang. Skor yang berubah hanya dipakai keputusan BERIKUTNYA; keputusan
-    yang sudah lewat tidak diubah (§10 poin 3).
-    """
-    decision = get_decision_or_404(session, payload.decision_id)
-    now = _now()
-
-    try:
-        outcome = outcome_for_condition(payload.physical_condition)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422, detail={"error": "unknown_condition", "detail": str(exc)}
-        ) from None
-
-    try:
-        validate_receiving(
-            decision_status=decision.status,
-            current_outcome=decision.outcome,
-            recorder_role=user.role,
-            recorder_location_id=user.location_id,
-            target_location_id=decision.target_location_id,
-        )
-    except ReceivingRuleError as exc:
-        raise _receiving_error(exc) from None
-
-    po = _linked_purchase_order(provider, decision)
-
-    session.add(
-        DecisionEvidence(
-            decision_id=decision.id,
-            evidence_type="human_inspection",
-            payload={
-                "physical_condition": payload.physical_condition,
-                "measured_temperature_c": float(payload.measured_temperature_c)
-                if payload.measured_temperature_c is not None
-                else None,
-                "delivered_quantity_kg": float(payload.delivered_quantity_kg)
-                if payload.delivered_quantity_kg is not None
-                else None,
-                "outcome": outcome,
-                "notes": payload.notes,
-                "recorded_by": user.email,
-                "recorded_by_role": user.role,
-                "purchase_order": po.PurchaseOrder,
-            },
-            is_consistent=None,
-            recorded_at=now,
-        )
-    )
-    decision.outcome = outcome
-
-    supplier_score, considered_count, considered = _apply_learn(
-        session,
-        supplier_id=str(_domain_supplier_from_partner(session, provider, po.Supplier).id),
-    )
-
-    # Jejak LEARN ditulis supaya perubahan skor bisa diaudit dari UI (design.md §3.9c).
-    # Tanpa suffix [primary]/[fallback_n]: aturan suffix itu untuk panggilan model AI
-    # (docs/Schema.md §6), sedangkan LEARN bukan panggilan model.
-    _record_trace(
-        session,
-        decision,
-        step_name="LEARN",
-        tool_called="core/learn.adjusted_reliability",
-        input_summary={
-            "supplier": supplier_score.supplier,
-            "reliability_score_before": float(supplier_score.reliability_score_before),
-            "outcomes_considered": considered,
-            "window": supplier_score.window,
-            "total_decided_outcomes": considered_count,
-        },
-        output_summary={
-            "reliability_score_after": float(supplier_score.reliability_score_after),
-            "changed": supplier_score.changed,
-        },
-    )
-
-    try:
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    session.refresh(decision)
-
-    return ReceiveResponse(
-        decision=build_decision_out(session, decision),
-        outcome=outcome,
-        supplier_score=supplier_score,
     )
 
 

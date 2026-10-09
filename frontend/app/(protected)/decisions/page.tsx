@@ -35,15 +35,10 @@ const STATUS_FILTERS: { value: "all" | DecisionStatus; label: string }[] = [
   { value: "all", label: "Semua" },
   { value: "proposed", label: decisionStatusLabel("proposed") },
   { value: "verifier_flagged", label: decisionStatusLabel("verifier_flagged") },
-  {
-    value: "verifier_unavailable",
-    label: decisionStatusLabel("verifier_unavailable"),
-  },
   { value: "pending_approval", label: decisionStatusLabel("pending_approval") },
   { value: "approved", label: decisionStatusLabel("approved") },
   { value: "rejected", label: decisionStatusLabel("rejected") },
   { value: "executed", label: decisionStatusLabel("executed") },
-  { value: "expired", label: decisionStatusLabel("expired") },
 ];
 
 /**
@@ -121,12 +116,11 @@ function DecisionsPageInner() {
 
   const counts = useMemo(
     () => ({
-      // flagged & verifier_unavailable sama-sama butuh 2 approval (Schema.md §6).
+      // flagged butuh 2 approval, pending_approval cukup 1 (Schema.md §3).
       pending: inScope.filter(
         (d) =>
           d.status === "pending_approval" ||
-          d.status === "verifier_flagged" ||
-          d.status === "verifier_unavailable",
+          d.status === "verifier_flagged",
       ).length,
       flagged: inScope.filter((d) => d.verifierNote).length,
       executed: inScope.filter((d) => d.status === "executed").length,

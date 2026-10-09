@@ -21,6 +21,7 @@ from app.db_seed import (
     _split_quantity,
     seed_demo_data,
 )
+from app.core.shelf_life import usable_until as derive_usable_until
 from app.models import Batch, Commodity, DemandRecord, Location, SapMockMaterialStock
 from app.sap_integration.field_mapping import (
     MATERIAL_NUMBER_BY_COMMODITY,
@@ -176,7 +177,9 @@ def test_failed_and_excursing_batches_are_seeded_as_described(db_factory):
     # penyimpangan suhu rantai dingin (Jakarta Utara). Jangan dilonggarkan jadi "> 0" — kalau ada
     # yang menghapus barisnya, nama lokasinya tidak lagi cocok dengan narasi demo.
     assert [names[b.location_id] for b in failed] == ["SPPG Jakarta Selatan"]
-    assert all(b.usable_until < now for b in failed), "batch gagal aman harus sudah lewat masa pakai"
+    assert all(derive_usable_until(b.harvested_at) < now for b in failed), (
+        "batch gagal aman harus sudah lewat masa pakai"
+    )
     # Titik itu punya 2 batch, jadi keduanya harus menyimpang — bukan hanya satu.
     assert {names[b.location_id] for b in excursing} == {"SPPG Jakarta Utara"}
 

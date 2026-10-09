@@ -1,17 +1,23 @@
 """aturan approval — logika murni, tidak tahu HTTP maupun database.
 
-Sumber tunggal: `docs/Skill.md` §9 (approval matrix) dan `docs/Schema.md` §6 (catatan integritas).
-Modul ini sengaja tidak menyentuh ORM supaya bisa diuji tanpa Postgres, dan supaya aturannya bisa
-dibaca sebagai aturan — bukan tersebar di dalam endpoint.
+Sumber tunggal: `docs/Schema.md` §3 & §6 (kontrak status + catatan integritas) dan
+`docs/PRD.md` §5 ("approver SPPG approve atau reject aksi berisiko tinggi sebelum eksekusi;
+`bgn_monitor` read-only"). Modul ini sengaja tidak menyentuh ORM supaya bisa diuji tanpa Postgres,
+dan supaya aturannya bisa dibaca sebagai aturan — bukan tersebar di dalam endpoint.
 
 Dua keputusan desain yang penting:
 
 1. **Status keputusan adalah sumber kebenaran jumlah approval.** `pending_approval` butuh 1,
-   `verifier_flagged`/`verifier_unavailable` butuh 2. Approval pertama pada keputusan yang butuh dua
-   TIDAK mengubah status (kalau diturunkan jadi `pending_approval`, syaratnya akan salah terbaca
-   sebagai "cukup satu").
+   `verifier_flagged` butuh 2. Approval pertama pada keputusan yang butuh dua TIDAK mengubah
+   status (kalau diturunkan jadi `pending_approval`, syaratnya akan salah terbaca sebagai
+   "cukup satu").
 2. **Dua approval pada status yang butuh dua bukan berarti "dua orang",** melainkan satu
-   `sppg_head` DAN satu `sppg_nutritionist` dari SPPG penerima (`docs/Skill.md` §9).
+   `sppg_head` DAN satu `sppg_nutritionist` dari SPPG penerima.
+
+Catatan revisi dokumen 9 Okt: status `verifier_unavailable` DIHAPUS dari kontrak
+(`docs/Schema.md` §3), jadi jalur "verifier gagal total → wajib dua approval" tidak ada lagi.
+Verifier yang tidak tersedia kini berarti keputusan tetap `proposed` dan belum bisa di-approve
+sama sekali — lebih ketat, bukan lebih longgar.
 """
 
 from __future__ import annotations
@@ -23,17 +29,16 @@ from typing import Iterable, Sequence
 # Peran yang boleh meng-approve. `bgn_monitor` tidak pernah ada di sini — dia read-only.
 APPROVER_ROLES = ("sppg_head", "sppg_nutritionist")
 
-# Status keputusan yang sedang menunggu approval (docs/Skill.md §9, kolom "Kondisi decision").
-APPROVABLE_STATUSES = ("pending_approval", "verifier_flagged", "verifier_unavailable")
+# Status keputusan yang sedang menunggu approval (`docs/Schema.md` §3, revisi 9 Okt).
+APPROVABLE_STATUSES = ("pending_approval", "verifier_flagged")
 
 REQUIRED_APPROVALS: dict[str, int] = {
     "pending_approval": 1,
     "verifier_flagged": 2,
-    "verifier_unavailable": 2,
 }
 
 # Status yang menuntut peran tertentu (head DAN nutritionist), bukan sekadar jumlah orang.
-STATUSES_REQUIRING_BOTH_ROLES = ("verifier_flagged", "verifier_unavailable")
+STATUSES_REQUIRING_BOTH_ROLES = ("verifier_flagged",)
 
 
 class ApprovalRuleError(Exception):
@@ -55,7 +60,7 @@ class ApprovalVote:
 
 
 def required_approvals(status: str) -> int:
-    """Berapa approval yang dibutuhkan untuk status ini (docs/Skill.md §9)."""
+    """Berapa approval yang dibutuhkan untuk status ini (`docs/Schema.md` §3)."""
     try:
         return REQUIRED_APPROVALS[status]
     except KeyError:
@@ -95,7 +100,7 @@ def validate_vote(
         raise ApprovalRuleError(
             "decision_expired",
             "Keputusan sudah lewat masa berlaku (expires_at) dan tidak boleh di-approve; "
-            "Supervisor harus mengulang dari DETECT dengan data terbaru (docs/Skill.md §9).",
+            "Supervisor harus mengulang dari DETECT dengan data terbaru (`docs/Schema.md` §3).",
         )
 
     if target_location_id is None:
@@ -108,7 +113,7 @@ def validate_vote(
     if approver_role not in APPROVER_ROLES:
         raise ApprovalRuleError(
             "approver_role_not_allowed",
-            f"Peran {approver_role!r} tidak boleh meng-approve pembelian (docs/Skill.md §9). "
+            f"Peran {approver_role!r} tidak boleh meng-approve pembelian (`docs/Schema.md` §3). "
             f"Yang sah: {', '.join(APPROVER_ROLES)}.",
         )
 
@@ -116,7 +121,7 @@ def validate_vote(
         raise ApprovalRuleError(
             "approver_location_mismatch",
             "Approver harus berasal dari SPPG penerima (lokasi tujuan keputusan), bukan SPPG lain "
-            "dan bukan lintas lokasi (docs/Skill.md §9).",
+            "dan bukan lintas lokasi (`docs/Schema.md` §3).",
         )
 
     if any(vote.approver_id == approver_id for vote in votes):
@@ -150,7 +155,7 @@ def _approved_votes(status: str, votes: Iterable[ApprovalVote]) -> list[Approval
 
 
 def is_rejected(votes: Iterable[ApprovalVote]) -> bool:
-    """Satu penolakan dari approver sah mana pun sudah cukup (docs/Skill.md §9)."""
+    """Satu penolakan dari approver sah mana pun sudah cukup (`docs/Schema.md` §3)."""
     return any(not vote.approved and vote.role in APPROVER_ROLES for vote in votes)
 
 

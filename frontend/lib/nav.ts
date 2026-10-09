@@ -19,12 +19,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", field: true },
   { href: "/today", label: "Hari Ini", field: true },
   { href: "/decisions", label: "Keputusan", field: true },
-  {
-    href: "/receiving",
-    label: "Penerimaan",
-    roles: ["sppg_head", "sppg_nutritionist"],
-    field: true,
-  },
   { href: "/compliance", label: "Keamanan Pangan", field: true },
   { href: "/surplus", label: "Surplus & Limbah", roles: ["sppg_head", "sppg_nutritionist"] },
   { href: "/suppliers", label: "Pemasok" },

@@ -33,7 +33,7 @@ SAP_ONLY_PURCHASE_ORDER_FIELDS: Final[tuple[str, ...]] = (
     "CompanyCode",
 )
 
-# Kode SAP untuk angka baku demo (docs/Skill.md §11). SAP asli memakai kode, bukan nama —
+# Kode SAP untuk angka baku demo (`app/db_seed.py`). SAP asli memakai kode, bukan nama —
 # jadi mock juga memakai kode supaya bentuknya identik. Nama tampilan dipetakan di sini.
 # KEPUTUSAN YANG PERLU DIKONFIRMASI: apakah demo memakai kode plant (CJ01/JK01) atau nama.
 PLANT_CODE_BY_LOCATION: Final[dict[str, str]] = {
@@ -53,7 +53,7 @@ PLANT_CODE_BY_LOCATION: Final[dict[str, str]] = {
 
 # Nama komoditas mengikuti `docs/Schema.md` §1 (`commodities.name`: "telur", huruf kecil) —
 # dokumen adalah kontrak, jadi istilah tampilan pun ikut huruf kecil.
-# URUTAN penting: `mock_provider` mengambil material pertama sebagai telur (fixture §11), jadi
+# URUTAN penting: `mock_provider` mengambil material pertama sebagai telur (fixture `db_seed`), jadi
 # "telur" tidak boleh berpindah dari posisi pertama.
 MATERIAL_NUMBER_BY_COMMODITY: Final[dict[str, str]] = {
     "telur": "TELUR-01",

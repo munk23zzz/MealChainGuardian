@@ -16,15 +16,8 @@ import type {
   KpiSnapshot,
   Recommendation,
   Location,
-  DeliveryOutcome,
-  EvidenceItem,
-  ReceivingInspectionRequest,
-  ReceivingInspectionResult,
   Supplier,
-  SupplierHistory,
 } from "./api/schema";
-import { applyLearn, parseSupplierId } from "./reliability";
-import { getWinningCandidate } from "./decisions";
 import {
   MOCK_USERS,
   MOCK_LOCATIONS,
@@ -35,8 +28,6 @@ import {
   MOCK_KPI,
   MOCK_KPI_PREVIOUS,
   MOCK_SUPPLIERS,
-  MOCK_SUPPLIER_EVENTS,
-  mockSupplierHistory,
 } from "./mock-data";
 
 const API_BASE_URL =
@@ -243,115 +234,11 @@ export function getKpi(): Promise<KpiSnapshot> {
 }
 
 // ---------------------------------------------------------------------------
-// Pemasok & Receiving Inspection (design.md §3.9c & §3.5b)
+// Pemasok (design.md §3.9c, Schema.md §1 `suppliers`)
 // ---------------------------------------------------------------------------
 
 /** Skor kepercayaan pemasok terkini (Schema.md §1 `suppliers`). */
 export function getSuppliers(): Promise<Supplier[]> {
   if (USE_MOCK) return mockDelay(MOCK_SUPPLIERS.map((s) => ({ ...s })));
   return request<Supplier[]>("/ui/suppliers");
-}
-
-/** Riwayat penerimaan + skor satu pemasok — dasar grafik "sebelum/sesudah insiden". */
-export function getSupplierHistory(supplierId: string): Promise<SupplierHistory> {
-  if (USE_MOCK) {
-    const history = mockSupplierHistory(supplierId);
-    if (!history) return Promise.reject(new Error("Pemasok tidak ditemukan"));
-    return mockDelay(history);
-  }
-  return request<SupplierHistory>(`/ui/suppliers/${supplierId}/history`);
-}
-
-const PHYSICAL_CONDITION_LABELS: Record<
-  ReceivingInspectionRequest["physicalCondition"],
-  string
-> = {
-  baik: "baik",
-  rusak_sebagian: "rusak sebagian",
-  rusak: "rusak",
-};
-
-/**
- * Receiving Inspection (design.md §3.5b): Ahli Gizi mencatat kondisi barang tiba.
- *
- * Menulis evidence `human_inspection` DAN mengisi `decisions.outcome`
- * (Schema.md §3). Kalau hasilnya `failure`, langkah LEARN (Skill.md §10) berjalan:
- * `reliability_score` pemasok kandidat terpilih diturunkan memakai formula yang
- * sama dengan UI. Status keputusan TIDAK diubah di sini — transisi status tetap
- * milik alur approvals (Schema.md §6).
- */
-export function submitReceivingInspection(
-  payload: ReceivingInspectionRequest,
-): Promise<ReceivingInspectionResult> {
-  if (USE_MOCK) {
-    const idx = mockDecisions.findIndex((d) => d.id === payload.decisionId);
-    if (idx === -1) return Promise.reject(new Error("Keputusan tidak ditemukan"));
-    const decision = mockDecisions[idx];
-    if (decision.status !== "approved" && decision.status !== "executed") {
-      return Promise.reject(
-        new Error(
-          "Penerimaan hanya bisa dicatat untuk keputusan yang sudah disetujui atau dieksekusi",
-        ),
-      );
-    }
-
-    const outcome: DeliveryOutcome =
-      payload.physicalCondition === "baik" ? "success" : "failure";
-    const recordedAt = new Date().toISOString();
-    const evidence: EvidenceItem = {
-      id: `evi-${Math.floor(1000 + Math.random() * 8999)}`,
-      type: "human_inspection",
-      source: "Inspeksi petugas SPPG (Ahli Gizi)",
-      summary: `Suhu terukur ${payload.measuredTempC} °C · kondisi ${
-        PHYSICAL_CONDITION_LABELS[payload.physicalCondition]
-      }${payload.note ? ` · ${payload.note}` : ""}`,
-      recordedAt,
-      isConsistent: outcome === "success",
-    };
-
-    mockDecisions[idx] = {
-      ...decision,
-      outcome,
-      evidenceItems: [...(decision.evidenceItems ?? []), evidence],
-    };
-
-    // LEARN (Skill.md §10): hanya `failure` yang menurunkan skor. Ini yang membuat
-    // perubahan skor TERLIHAT di layar, bukan cuma diklaim.
-    if (outcome === "failure") {
-      const winner = getWinningCandidate(decision);
-      const supplierId = parseSupplierId(winner?.supplierId);
-      if (supplierId) {
-        const events =
-          MOCK_SUPPLIER_EVENTS[supplierId] ??
-          (MOCK_SUPPLIER_EVENTS[supplierId] = []);
-        events.push({
-          at: recordedAt,
-          outcome,
-          decisionId: decision.id,
-          commodityId: decision.commodityId,
-          quantityKg: decision.quantityKg,
-          note: evidence.summary,
-        });
-        const supplier = MOCK_SUPPLIERS.find((s) => s.id === supplierId);
-        if (supplier) {
-          supplier.reliabilityScore = applyLearn(
-            supplier.reliabilityScore,
-            events.map((e) => e.outcome),
-          );
-        }
-      }
-    }
-
-    return mockDelay({
-      decision: { ...mockDecisions[idx] },
-      evidenceId: evidence.id!,
-      outcome,
-      affectsSupplierReliability: outcome === "failure",
-    });
-  }
-
-  return request<ReceivingInspectionResult>("/ui/actions/receive", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 }

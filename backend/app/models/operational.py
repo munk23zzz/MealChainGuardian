@@ -61,7 +61,19 @@ class DemandRecord(Base):
 
 class PriceSignal(Base):
     __tablename__ = "price_signals"
-    __table_args__ = (CheckConstraint("price_per_kg > 0", name="price_signals_price_check"),)
+    __table_args__ = (
+        CheckConstraint("price_per_kg > 0", name="price_signals_price_check"),
+        CheckConstraint(
+            "source IN ('pihps_reference', 'supplier_quote')", name="price_signals_source_check"
+        ),
+        # docs/Schema.md §2 (revisi kedua Roy 2026-10-03): identitas pemasok WAJIB ada saat
+        # kuotasi pemasok, dan WAJIB kosong saat barisnya harga acuan pasar (PIHPS).
+        CheckConstraint(
+            "(source = 'supplier_quote' AND supplier_id IS NOT NULL) "
+            "OR (source = 'pihps_reference' AND supplier_id IS NULL)",
+            name="price_signals_supplier_check",
+        ),
+    )
 
     id: Mapped[UuidPk]
     location_id: Mapped[uuid.UUID] = mapped_column(
@@ -71,6 +83,12 @@ class PriceSignal(Base):
         PG_UUID(as_uuid=True), ForeignKey("commodities.id"), nullable=False
     )
     price_per_kg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    # docs/Schema.md §2 (revisi kedua Roy, 2026-10-03): identitas pemasok disimpan di kolom
+    # sendiri, BUKAN dienkode ke string `source`. WAJIB terisi saat `source='supplier_quote'`,
+    # WAJIB NULL saat `source='pihps_reference'`.
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True
+    )
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[CreatedAt]
@@ -110,5 +128,7 @@ class Batch(Base):
     )
     freshness_score: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     safety_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
-    usable_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # docs/Schema.md §2 (revisi 9 Okt): kolom `usable_until` DIHAPUS. Nilainya diturunkan saat
+    # dibutuhkan (`harvested_at` + masa layak komoditas) dan tetap muncul di respons
+    # `/freshness/evaluate` (docs/Skill.md §5) tanpa perlu disimpan.
     created_at: Mapped[CreatedAt]

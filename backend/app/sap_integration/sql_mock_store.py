@@ -97,7 +97,7 @@ class SqlSapMockStore:
         )
 
     def business_partners(self) -> Sequence[BusinessPartnerRecord]:
-        """BusinessPartner = KODE SAP (`SUP-A`, docs/Skill.md §11), bukan UUID domain.
+        """BusinessPartner = KODE SAP (`SUP-A`, `app/db_seed.py`), bukan UUID domain.
 
         Dokumen SAP selalu memakai kode alfanumerik, jadi provider mock pun memakai kode — sama di
         kedua mode store. Pasangan kode <-> pemasok domain ada di `field_mapping.py`

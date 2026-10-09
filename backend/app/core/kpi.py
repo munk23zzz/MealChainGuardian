@@ -27,7 +27,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
-#: `price_signals.source` yang menandai baris harga acuan pasar (dipakai seed §11).
+#: `price_signals.source` yang menandai baris harga acuan pasar (dipakai seed demo).
 REFERENCE_PRICE_SOURCE = "pihps_reference"
 
 #: Kanal bukti yang diminta Skill.md §4: SAP + IoT + fisik.

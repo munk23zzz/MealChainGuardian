@@ -6,14 +6,13 @@ import type { Role } from "@/lib/api/schema";
 describe("nav", () => {
   it("menyembunyikan halaman khusus untuk peran lain", () => {
     const guest = visibleNavItems(null).map((i) => i.href);
-    expect(guest).not.toContain("/receiving");
     expect(guest).not.toContain("/surplus");
 
     const head: Role = "sppg_head";
-    expect(visibleNavItems(head).map((i) => i.href)).toContain("/receiving");
+    expect(visibleNavItems(head).map((i) => i.href)).toContain("/surplus");
 
     const monitor: Role = "bgn_monitor";
-    expect(visibleNavItems(monitor).map((i) => i.href)).not.toContain("/receiving");
+    expect(visibleNavItems(monitor).map((i) => i.href)).not.toContain("/surplus");
     expect(visibleNavItems(monitor).map((i) => i.href)).toContain("/suppliers");
   });
 
@@ -42,9 +41,9 @@ describe("nav", () => {
 describe("buildCommands", () => {
   it("halaman mengikuti peran", () => {
     const head = buildCommands({ role: "sppg_head" }).map((c) => c.href);
-    expect(head).toContain("/receiving");
+    expect(head).toContain("/surplus");
     const monitor = buildCommands({ role: "bgn_monitor" }).map((c) => c.href);
-    expect(monitor).not.toContain("/receiving");
+    expect(monitor).not.toContain("/surplus");
   });
 
   it("memasukkan keputusan, pemasok, dan lokasi yang diberikan", () => {

@@ -10,7 +10,6 @@ from .base import Base
 from .decisions import (
     AGENT_STEPS,
     APPROVER_ROLES,
-    DECISION_OUTCOMES,
     DECISION_STATUSES,
     DECISION_TYPES,
     EVIDENCE_TYPES,
@@ -37,7 +36,6 @@ __all__ = [
     "AGENT_STEPS",
     "APPROVER_ROLES",
     "CERTIFICATION_STATUSES",
-    "DECISION_OUTCOMES",
     "DECISION_STATUSES",
     "DECISION_TYPES",
     "EVIDENCE_TYPES",

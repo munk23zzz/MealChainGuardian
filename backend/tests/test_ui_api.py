@@ -14,11 +14,12 @@ Semua endpoint UI ada di bawah `/ui/*` supaya kontrak domain (`/supply`, `/decis
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from api_support import (
     JAKARTA_HEAD,
-    JAKARTA_NUTRI,
     MONITOR,
     approved_decision,
     propose,
@@ -249,7 +250,6 @@ def test_decision_uses_the_recommendation_shape(client):
         "approvedAt",
         "expiresAt",
         "executedAt",
-        "outcome",
         "sapPurchaseOrder",
         "agentTrace",
     }
@@ -300,11 +300,14 @@ def test_executed_decision_carries_purchase_order_evidence_and_trace(client, sup
     assert row["executedAt"] is not None
 
 
-def test_decision_expiry_is_reported_as_missing_not_invented(client):
-    """`expires_at` belum diisi `/actions/propose` — UI harus menerima null, bukan tanggal karangan."""
+def test_decision_expiry_is_always_set_by_propose(client):
+    """`expires_at` NOT NULL sejak revisi 9 Okt (docs/Schema.md §3): `/actions/propose` mengisi SLA
+    bawaan kalau pemanggil tidak menyebut batas waktu, jadi UI tidak pernah menerima null."""
     propose(client, user_headers(client, JAKARTA_HEAD))
 
-    assert _decisions(client)[0]["expiresAt"] is None
+    expires_at = _decisions(client)[0]["expiresAt"]
+    assert expires_at is not None
+    assert datetime.fromisoformat(expires_at) > datetime.now(timezone.utc)
 
 
 def test_decision_detail_and_not_found(client):
@@ -444,47 +447,10 @@ def test_ui_reject_records_the_reason(client):
     assert body["id"] == decision_id
 
 
-def test_ui_receive_records_the_inspection_and_feeds_learn(client):
-    headers = user_headers(client, JAKARTA_HEAD)
-    decision_id = propose(client, headers).json()["decision"]["id"]
-    client.post("/ui/actions/approve", json={"decisionId": decision_id}, headers=headers)
-    client.post("/ui/actions/execute", json={"decisionId": decision_id}, headers=headers)
-
-    nutri = user_headers(client, JAKARTA_NUTRI)
-    response = client.post(
-        "/ui/actions/receive",
-        json={"decisionId": decision_id, "measuredTempC": 4.0, "physicalCondition": "baik"},
-        headers=nutri,
-    )
-
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["outcome"] == "success"
-    assert body["affectsSupplierReliability"] is False
-    assert body["evidenceId"]
-    assert body["decision"]["status"] == "executed"
-
-
-def test_ui_receive_keeps_the_nutritionist_only_rule(client, supplier_id):
-    """Aturan peran penerimaan ditegakkan backend, bukan cuma disembunyikan di UI."""
-    headers = user_headers(client, JAKARTA_HEAD)
-    decision_id = approved_decision(client, headers, supplier_id)
-
-    response = client.post(
-        "/ui/actions/receive",
-        json={"decisionId": decision_id, "measuredTempC": 4.0, "physicalCondition": "baik"},
-        headers=headers,
-    )
-
-    assert response.status_code == 403
-    assert response.json()["detail"]["error"] == "recorder_role_not_allowed"
-
-
 def test_ui_write_endpoints_require_a_token(client):
     for path, body in (
         ("/ui/actions/approve", {"decisionId": "x"}),
         ("/ui/actions/reject", {"decisionId": "x", "reason": "x"}),
         ("/ui/actions/execute", {"decisionId": "x"}),
-        ("/ui/actions/receive", {"decisionId": "x", "physicalCondition": "baik"}),
     ):
         assert client.post(path, json=body).status_code == 401, path

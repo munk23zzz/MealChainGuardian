@@ -1,7 +1,7 @@
 """Keputusan & audit trail — `docs/Schema.md` §3.
 
 Status di `decisions` adalah kontrak: safety status tidak pernah di-override, dan keputusan yang
-lewat `expires_at` tidak pernah berakhir `executed` (docs/Skill.md §9).
+lewat `expires_at` tidak pernah berakhir `executed` (docs/Schema.md §3).
 """
 
 from __future__ import annotations
@@ -18,17 +18,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base, CreatedAt, UuidPk
 
 DECISION_TYPES = ("regional_balance", "price_anomaly", "safety_disruption")
+# docs/Schema.md §3 (revisi 9 Okt): status `verifier_unavailable` dan `expired` DIHAPUS dari
+# kontrak. Kedaluwarsa kini diturunkan dari `expires_at` (`now >= expires_at`), bukan status
+# tersimpan — supaya riwayat tidak perlu ditulis ulang hanya karena waktu berjalan.
 DECISION_STATUSES = (
     "proposed",
     "verifier_flagged",
-    "verifier_unavailable",
     "pending_approval",
     "approved",
     "rejected",
     "executed",
-    "expired",
 )
-DECISION_OUTCOMES = ("pending", "success", "failure")
 AGENT_STEPS = ("DETECT", "VERIFY", "TRACE", "PREDICT", "OPTIMIZE", "DECIDE", "ACT", "LEARN")
 EVIDENCE_TYPES = (
     "sap_purchase_order",
@@ -45,13 +45,9 @@ class Decision(Base):
     __tablename__ = "decisions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('proposed','verifier_flagged','verifier_unavailable','pending_approval',"
-            "'approved','rejected','executed','expired')",
+            "status IN ('proposed','verifier_flagged','pending_approval',"
+            "'approved','rejected','executed')",
             name="decisions_status_check",
-        ),
-        CheckConstraint(
-            "outcome IS NULL OR outcome IN ('pending','success','failure')",
-            name="decisions_outcome_check",
         ),
         Index("idx_decisions_status", "status"),
     )
@@ -59,8 +55,7 @@ class Decision(Base):
     id: Mapped[UuidPk]
     decision_type: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="proposed")
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     proposed_by: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="supervisor_agent"
     )
@@ -115,16 +110,12 @@ class AgentTrace(Base):
 
 
 class Approval(Base):
-    """`approver_role` = snapshot role saat approve (audit). bgn_monitor tidak pernah di sini."""
+    """Satu suara approval. `docs/Schema.md` §3 (revisi 9 Okt): snapshot peran (`approver_role`)
+    dan unique index `(decision_id, approved_by)` DIHAPUS dari skema — peran approver dibaca dari
+    `users.role` saat validasi, dan aturan "satu orang sekali" ditegakkan di domain
+    (`core/approval_rules.py`, kode `duplicate_approver`)."""
 
     __tablename__ = "approvals"
-    __table_args__ = (
-        CheckConstraint(
-            "approver_role IN ('sppg_head','sppg_nutritionist')", name="approvals_role_check"
-        ),
-        # docs/Schema.md §5 + §6: satu orang tidak bisa approve dua kali untuk keputusan yang sama.
-        Index("uq_approvals_decision_user", "decision_id", "approved_by", unique=True),
-    )
 
     id: Mapped[UuidPk]
     decision_id: Mapped[uuid.UUID] = mapped_column(
@@ -133,7 +124,6 @@ class Approval(Base):
     approved_by: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
-    approver_role: Mapped[str] = mapped_column(Text, nullable=False)
     approved: Mapped[bool] = mapped_column(Boolean, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

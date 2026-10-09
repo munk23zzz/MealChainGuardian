@@ -8,7 +8,7 @@ gagal diam-diam saat `NEXT_PUBLIC_USE_MOCK=false`.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -34,14 +34,18 @@ def test_stale_demo_row_is_renamed_without_losing_its_history(db_factory, monkey
         session.add(stale)
         # Keputusan dibuat di sini, bukan diasumsikan ada: `reset_dynamic_tables` (fixture) memang
         # mengosongkan `decisions`, jadi seed tidak menjamin barisnya ada saat test ini jalan.
-        decision = Decision(decision_type="regional_balance", status="pending_approval")
+        decision = Decision(
+            decision_type="regional_balance",
+            status="pending_approval",
+            # `expires_at` NOT NULL sejak revisi 9 Okt (docs/Schema.md §3).
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
+        )
         session.add(decision)
         session.flush()
         session.add(
             Approval(
                 decision_id=decision.id,
                 approved_by=stale.id,
-                approver_role="sppg_head",
                 approved=True,
                 approved_at=datetime.now(timezone.utc),
             )

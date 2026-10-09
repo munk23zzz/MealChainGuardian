@@ -1,7 +1,7 @@
 """Fixtures + registry provider untuk contract test SAP.
 
-Fixtures di sini juga dipakai `test_actions_api.py` dan `test_receive_api.py` (client + database
-test), supaya jalur transaksi yang diuji di test sama dengan yang dipakai di produksi.
+Fixtures di sini juga dipakai `test_actions_api.py` (client + database test), supaya jalur
+transaksi yang diuji di test sama dengan yang dipakai di produksi.
 
 Cara menambah provider baru supaya otomatis ikut SELURUH contract test: daftarkan di
 `CONTRACT_PROVIDER_FACTORIES`. Tidak ada test yang perlu diubah.
@@ -71,7 +71,7 @@ def client(db_factory):
         # men-cache dependency per callable, jadi dengan kunci yang sama endpoint dan provider
         # benar-benar memakai SATU session untuk request ini — persis seperti produksi. Kalau di
         # sini dibuat session sendiri, PO akan ter-flush di session lain dan tidak pernah ter-commit
-        # (bug yang pernah tertangkap justru oleh test `receive`).
+        # (bug yang pernah tertangkap justru oleh test jalur aksi `execute`).
         provider = MockSAPProvider(store=SqlSapMockStore(session=session))
         try:
             yield provider

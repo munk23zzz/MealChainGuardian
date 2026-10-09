@@ -9,7 +9,6 @@ const PROTECTED_PREFIXES = [
   "/decisions",
   "/agent-log",
   "/kpi",
-  "/receiving",
   "/suppliers",
   "/compliance",
   "/surplus",
