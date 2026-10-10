@@ -2,8 +2,9 @@
  * Service worker minimal untuk dapur SPPG (jaringan buruk).
  *
  * Strategi:
- * - Dokumen HTML: network-first, jatuh ke cache (atau /dashboard) bila offline —
- *   supaya pengguna tetap bisa membuka layar terakhir.
+ * - Dokumen HTML: network-first DENGAN VALIDASI ULANG (`cache: "no-cache"`), jatuh ke cache
+ *   (atau /dashboard) bila offline — supaya pengguna tetap bisa membuka layar terakhir,
+ *   tetapi HTML tidak pernah basi lebih dari satu muat ulang (Pages: `max-age=600`).
  * - Aset statis (CSS/JS/ikon/gambar): STALE-WHILE-REVALIDATE — salinan cache dikirim
  *   seketika (cepat + bisa offline), sambil versi barunya diambil di latar dan disimpan.
  *   Kenapa bukan cache-first murni seperti sebelumnya: `public/` tidak ber-hash, jadi
@@ -53,7 +54,13 @@ self.addEventListener("fetch", (event) => {
   const isDocument = request.headers.get("accept")?.includes("text/html");
   if (isDocument) {
     event.respondWith(
-      fetch(request)
+      // `cache: "no-cache"` penting. GitHub Pages mengirim `Cache-Control: max-age=600`,
+      // jadi `fetch(request)` biasa bisa mengembalikan HTML berumur sampai 10 menit — dan
+      // HTML lama itu masih menunjuk URL aset TANPA hash (`/img/logo-mark.png`), sehingga
+      // pengguna tetap melihat artwork lama sesudah deploy walau berkas di server sudah baru
+      // (kejadian 10 Okt: "di browser belum berubah"). Dengan `no-cache`, HTML selalu
+      // divalidasi ulang; Pages menjawab 304 bila isinya sama, jadi ongkosnya kecil.
+      fetch(request, { cache: "no-cache" })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => undefined);
