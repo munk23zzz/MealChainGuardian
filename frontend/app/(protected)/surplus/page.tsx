@@ -11,9 +11,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/auth";
 import { MOCK_BATCHES } from "@/lib/mock-compliance";
+import { MOCK_LOCATIONS } from "@/lib/mock-data";
 import { SURPLUS_ROLES } from "@/lib/nav";
 import { partitionBatchesByScope } from "@/lib/region-map";
 import { scopeForRole } from "@/lib/role";
+import { showAllLabel } from "@/lib/scope";
 
 /**
  * Surplus dan Limbah: dasar hukum Peraturan BGN No. 1 Tahun 2026 tentang penanganan sisa
@@ -40,7 +42,7 @@ export default function SurplusPage() {
     [showAllScopes, roleScope],
   );
   const { inScope, outOfScope } = useMemo(
-    () => partitionBatchesByScope(MOCK_BATCHES, effectiveScope),
+    () => partitionBatchesByScope(MOCK_BATCHES, effectiveScope, MOCK_LOCATIONS),
     [effectiveScope],
   );
 
@@ -94,7 +96,7 @@ export default function SurplusPage() {
           <p className="text-muted-foreground">
             Sisa pangan yang masih dalam jendela aman 4 jam saat tiba boleh
             dialihkan ke penerima lain; sisanya wajib dicatat penanganannya.
-            Rencana disusun per batch wilayah tanggung jawab Anda.
+            Rencana disusun per batch dalam cakupan tanggung jawab Anda.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -111,6 +113,7 @@ export default function SurplusPage() {
         canToggle={roleScope.kind !== "all"}
         showingAll={showAllScopes}
         roleScope={roleScope}
+        locations={MOCK_LOCATIONS}
         onToggle={() => setShowAllScopes((value) => !value)}
       />
 
@@ -124,7 +127,7 @@ export default function SurplusPage() {
               size="sm"
               onClick={() => setShowAllScopes(true)}
             >
-              Tampilkan semua wilayah
+              {showAllLabel(roleScope)}
             </Button>
           )
         }

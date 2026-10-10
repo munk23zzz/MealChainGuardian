@@ -71,20 +71,27 @@ function minutesFromNow(minutes: number): string {
 
 const exp = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
 
-// sppg_head — Jakarta, bisa approve
+// sppg_head — SPPG Jakarta Utara (loc-2), bisa approve.
+// Revisi 10 Okt 2026: satu orang = satu SPPG, jadi klaim `locationId` WAJIB ada — cakupan
+// kepala dihitung dari situ, bukan dari `region` (region tetap dikirim backend untuk label,
+// tapi tidak lagi dipakai untuk otorisasi).
 export const MOCK_TOKEN_SPPG_HEAD = makeMockJwt({
   sub: "user-sppg-head",
   role: "sppg_head",
+  locationId: "loc-2",
   region: "DKI Jakarta",
   canApprove: true,
   exp,
 });
 
-// sppg_nutritionist — Bogor, bisa approve
+// sppg_nutritionist — SPPG Jakarta Utara (loc-2), bisa approve. Satu tim dengan kepala SPPG
+// supaya alur `verifier_flagged` (butuh kepala + ahli gizi DARI SPPG YANG SAMA) bisa
+// diselesaikan dengan akun demo yang ada.
 export const MOCK_TOKEN_NUTRITIONIST = makeMockJwt({
   sub: "user-nutritionist",
   role: "sppg_nutritionist",
-  region: "Jawa Barat",
+  locationId: "loc-2",
+  region: "DKI Jakarta",
   canApprove: true,
   exp,
 });
@@ -107,8 +114,9 @@ export const MOCK_USERS: Record<string, { password: string; token: string; user:
     token: MOCK_TOKEN_SPPG_HEAD,
     user: {
       id: "user-sppg-head",
-      name: "Kepala SPPG Jakarta",
+      name: "Kepala SPPG Jakarta Utara",
       role: "sppg_head",
+      locationId: "loc-2",
       region: "DKI Jakarta",
       canApprove: true,
     },
@@ -118,9 +126,10 @@ export const MOCK_USERS: Record<string, { password: string; token: string; user:
     token: MOCK_TOKEN_NUTRITIONIST,
     user: {
       id: "user-nutritionist",
-      name: "Ahli Gizi SPPG Bogor",
+      name: "Ahli Gizi SPPG Jakarta Utara",
       role: "sppg_nutritionist",
-      region: "Jawa Barat",
+      locationId: "loc-2",
+      region: "DKI Jakarta",
       canApprove: true,
     },
   },
@@ -412,17 +421,21 @@ export const MOCK_DECISIONS: Recommendation[] = [
     agentTrace: fullTrace(24),
   },
   {
-    // Event 3 (bagian pertama): safety disruption → perlu verifikasi manusia
+    // Event 3 (bagian pertama): safety disruption → perlu verifikasi manusia.
+    // Revisi 10 Okt 2026: tujuan dipindah dari loc-4 (Jakarta Selatan) ke loc-2 (Jakarta Utara)
+    // supaya alur `verifier_flagged` (butuh 2 approval: Kepala + Ahli Gizi DARI SPPG PENERIMA)
+    // bisa benar-benar diselesaikan oleh akun demo. Baris pasokan Jakarta Selatan yang gagal
+    // TIDAK diubah — ia tetap jangkar kasus merah di peta (lihat skill: jangan ubah baris jangkar).
     id: "dec-002",
     status: "verifier_flagged",
     decisionType: "safety_disruption",
     sourceLocationId: "loc-3",
-    targetLocationId: "loc-4",
+    targetLocationId: "loc-2",
     commodityId: "com-ayam",
     quantityKg: 150,
     safetyCheck: "NEEDS_VERIFICATION",
     reason:
-      "Stok ayam Jakarta Selatan kritis (usable 40 kg dari 50 kg fisik; satu batch FAIL karena kedaluwarsa). Kandidat Jakarta Barat lolos safety, tapi bukti IoT untuk lokasi tujuan tidak tersedia sehingga Verifier meminta verifikasi manusia.",
+      "Stok ayam Jakarta Utara tipis: usable 180 kg dari 200 kg fisik, sementara permintaan 300 kg (defisit 120 kg). Kandidat Jakarta Barat (surplus 600 kg) lolos safety, tapi bukti IoT untuk lokasi tujuan tidak tersedia sehingga Verifier meminta verifikasi manusia.",
     createdAt: minutesAgo(58),
     // Mendesak (di bawah 2 jam) + butuh 2 approval → cerita "decision time".
     expiresAt: minutesFromNow(26),
@@ -431,14 +444,14 @@ export const MOCK_DECISIONS: Recommendation[] = [
       iot: false,
       physical: true,
       completenessPercent: 72,
-      inconsistencies: [{ description: "Data IoT loc-4 tidak tersedia (sensor offline)" }],
+      inconsistencies: [{ description: "Data IoT loc-2 tidak tersedia (sensor offline)" }],
     },
     evidenceItems: [
       {
         id: "ev-002-1",
         type: "sap_purchase_order",
         source: "SAP PO 4500001301 (mock)",
-        summary: "PO ayam 150 kg untuk plant loc-4.",
+        summary: "PO ayam 150 kg untuk plant loc-2.",
         recordedAt: minutesAgo(120),
         isConsistent: true,
       },
@@ -446,14 +459,14 @@ export const MOCK_DECISIONS: Recommendation[] = [
         id: "ev-002-2",
         type: "gps",
         source: "GPS truk B-9031-KD",
-        summary: "Rute Jakarta Barat → Jakarta Selatan, 18 km.",
+        summary: "Rute Jakarta Barat → Jakarta Utara, 18 km.",
         recordedAt: minutesAgo(96),
         isConsistent: true,
       },
       {
         id: "ev-002-3",
         type: "temperature",
-        source: "Sensor IoT JKT-SELATAN-COLD-02",
+        source: "Sensor IoT JKT-UTARA-COLD-02",
         summary: "Sensor offline sejak 6 jam lalu, tidak ada pembacaan.",
         recordedAt: minutesAgo(360),
         isConsistent: false,
@@ -471,7 +484,7 @@ export const MOCK_DECISIONS: Recommendation[] = [
       {
         name: "safety_eligibility",
         passed: true,
-        detail: "Batch kandidat PASS; batch FAIL loc-4 otomatis dikeluarkan.",
+        detail: "Batch kandidat Jakarta Barat PASS; kelayakan lokasi tujuan belum bisa dipastikan (bukti IoT kosong).",
       },
       {
         name: "freshness_threshold",

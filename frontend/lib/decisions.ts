@@ -4,7 +4,6 @@
 import type {
   CandidateCostBreakdown,
   DecisionStatus,
-  Location,
   Recommendation,
 } from "./api/schema";
 
@@ -37,20 +36,7 @@ export function getWinningCandidate(
   );
 }
 
-/**
- * Region lokasi tujuan sebuah keputusan.
- *
- * Dipakai untuk cek scope approval: sppg_head/sppg_nutritionist hanya boleh
- * approve di region-nya (lib/auth.ts `canApproveForLocation`). Diekstrak ke sini
- * supaya halaman punya satu tempat pengambilan region yang bisa diuji — bug
- * "tombol Approve tidak pernah muncul" berasal dari region yang tidak dioper.
- *
- * Lokasi yang tidak ditemukan mengembalikan `undefined` (bukan region tebakan):
- * tanpa region, izin approve harus gagal-tertutup, bukan terbuka.
- */
-export function targetRegion(
-  recommendation: Recommendation,
-  locations: Location[],
-): string | undefined {
-  return locations.find((l) => l.id === recommendation.targetLocationId)?.region;
-}
+// `targetRegion()` DIHAPUS 10 Okt 2026: satu-satunya pemakainya adalah cek approval
+// berbasis wilayah di `components/decisions/approval-actions.tsx`. Sejak cakupan approval
+// ditentukan id SPPG (bukan region), helper itu tak lagi punya pemanggil — lebih baik
+// dihapus daripada menjadi jalur mati yang menyesatkan.

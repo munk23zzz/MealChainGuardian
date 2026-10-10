@@ -28,9 +28,9 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     username: "sppg.head@demo.local",
     password: "Demo#SPPG2026",
     // Label mengikuti CAKUPAN yang benar-benar berlaku di UI (mode mock: `MOCK_USERS` di
-    // lib/mock-data.ts). Cakupan data backend belum memakai kosakata yang sama
-    // (region backend masih "West"/"Central", lokasinya Cianjur/Jakarta saja) — lihat TODO.
-    detail: "DKI Jakarta · bisa approve",
+    // lib/mock-data.ts). Sejak 10 Okt 2026 cakupan kepala SPPG = SATU SPPG, jadi labelnya nama
+    // SPPG, bukan wilayah. Kosakata backend masih berbeda (lokasinya bernama "Jakarta") — dicatat di TODO.
+    detail: "SPPG Jakarta Utara · bisa approve",
     recommended: true,
   },
   {
@@ -38,7 +38,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     label: "Ahli Gizi SPPG",
     username: "sppg.nutritionist@demo.local",
     password: "Demo#Nut2026",
-    detail: "Jawa Barat (Bogor) · bisa approve",
+    detail: "SPPG Jakarta Utara · bisa approve",
     recommended: false,
   },
   {

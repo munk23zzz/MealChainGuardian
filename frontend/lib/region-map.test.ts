@@ -12,7 +12,13 @@
 import { describe, expect, it } from "vitest";
 
 import { MOCK_BATCHES } from "./mock-compliance";
-import { DESTINATION_REGION_KEYWORDS, partitionBatchesByScope, regionForDestination } from "./region-map";
+import { MOCK_LOCATIONS } from "./mock-data";
+import {
+  DESTINATION_REGION_KEYWORDS,
+  locationForDestination,
+  partitionBatchesByScope,
+  regionForDestination,
+} from "./region-map";
 import { isRegionInScope, partitionByScope } from "./scope";
 import type { DataScope } from "./role";
 
@@ -58,6 +64,31 @@ describe("isRegionInScope", () => {
   });
 });
 
+describe("locationForDestination", () => {
+  it("mengenali SPPG dari nama tujuan pengiriman", () => {
+    expect(locationForDestination("SDN 05 Jakarta Utara", MOCK_LOCATIONS)).toBe("loc-2");
+    expect(locationForDestination("SDN 12 Jakarta Pusat", MOCK_LOCATIONS)).toBe("loc-1");
+    expect(locationForDestination("SMPN 3 Bogor", MOCK_LOCATIONS)).toBe("loc-6");
+    expect(locationForDestination("Gudang Cianjur (kirim)", MOCK_LOCATIONS)).toBe("loc-10");
+  });
+
+  it("tidak bergantung huruf besar/kecil", () => {
+    expect(locationForDestination("sdn 4 jakarta timur", MOCK_LOCATIONS)).toBe("loc-5");
+  });
+
+  it("kata kunci terpanjang menang (Jakarta Utara bukan tertangkap nama lebih pendek)", () => {
+    expect(locationForDestination("SDN 05 Jakarta Utara", MOCK_LOCATIONS)).toBe("loc-2");
+  });
+
+  it("tujuan di luar daftar lokasi demo → null (gagal-tertutup)", () => {
+    expect(locationForDestination("SDN 1 Makassar", MOCK_LOCATIONS)).toBeNull();
+  });
+
+  it("nama lokasi tanpa nama tempat → null, bukan menebak", () => {
+    expect(locationForDestination("SDN 9 Jakarta", [{ id: "loc-x", name: "SPPG" }])).toBeNull();
+  });
+});
+
 describe("partitionBatchesByScope", () => {
   const scope = (over: DataScope): DataScope => over;
 
@@ -79,10 +110,32 @@ describe("partitionBatchesByScope", () => {
     expect(hasil.outOfScope).toHaveLength(0);
   });
 
-  it("peran satu lokasi tidak melihat batch mana pun lewat pencocokan wilayah", () => {
-    const hasil = partitionBatchesByScope(MOCK_BATCHES, scope({ kind: "location", locationId: "loc-2" }));
+  it("peran satu SPPG melihat batch untuk SPPG-nya saja", () => {
+    const hasil = partitionBatchesByScope(
+      MOCK_BATCHES,
+      scope({ kind: "location", locationId: "loc-2" }),
+      MOCK_LOCATIONS,
+    );
+    expect(hasil.inScope.map((b) => b.id)).toEqual(["B-2026-1007-A"]);
+    expect(hasil.outOfScope).toHaveLength(MOCK_BATCHES.length - 1);
+  });
+
+  it("SPPG tanpa batch di dataset melihat nol, bukan semua (gagal-tertutup)", () => {
+    const hasil = partitionBatchesByScope(
+      MOCK_BATCHES,
+      scope({ kind: "location", locationId: "loc-5" }),
+      MOCK_LOCATIONS,
+    );
     expect(hasil.inScope).toHaveLength(0);
-    expect(hasil.outOfScope).toHaveLength(MOCK_BATCHES.length);
+  });
+
+  it("tanpa daftar lokasi, cakupan satu SPPG tidak menampilkan apa pun", () => {
+    // Penjaga agar pemanggil yang lupa mengirim `locations` gagal-tertutup, bukan bocor.
+    const hasil = partitionBatchesByScope(
+      MOCK_BATCHES,
+      scope({ kind: "location", locationId: "loc-2" }),
+    );
+    expect(hasil.inScope).toHaveLength(0);
   });
 
   it("memakai partitionByScope: tidak membuang apa pun", () => {
@@ -91,11 +144,16 @@ describe("partitionBatchesByScope", () => {
     expect(inScope.length + outOfScope.length).toBe(total.inScope.length);
   });
 
-  it("setiap batch demo punya wilayah yang dikenali", () => {
+  it("setiap batch demo punya wilayah DAN lokasi yang dikenali", () => {
     for (const batch of MOCK_BATCHES) {
       expect(
         regionForDestination(batch.destination),
         `batch ${batch.id} (${batch.destination}) tidak bisa dipetakan ke wilayah`,
+      ).not.toBeNull();
+      // Tanpa lokasi, batch itu hilang dari layar kepala SPPG yang memilikinya.
+      expect(
+        locationForDestination(batch.destination, MOCK_LOCATIONS),
+        `batch ${batch.id} (${batch.destination}) tidak bisa dipetakan ke lokasi`,
       ).not.toBeNull();
     }
   });

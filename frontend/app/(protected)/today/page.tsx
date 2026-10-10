@@ -57,8 +57,8 @@ export default function TodayPage() {
 
   /** Batch demo dalam cakupan peran; sisanya disebut jumlahnya, bukan dihitung. */
   const { inScope: scopedBatches, outOfScope: batchesOutside } = useMemo(
-    () => partitionBatchesByScope(MOCK_BATCHES, scope),
-    [scope],
+    () => partitionBatchesByScope(MOCK_BATCHES, scope, locations),
+    [scope, locations],
   );
 
   /** Titik CCP gagal/mendekati batas, HANYA dari batch di cakupan peran. */
@@ -104,13 +104,13 @@ export default function TodayPage() {
       list.push({
         id: "compliance",
         title: "Titik keamanan pangan belum sesuai",
-        detail: `${ccpIssueCount} titik CCP di ${scopedBatches.length} batch ${scope.kind === "all" ? "seluruh wilayah" : "wilayah Anda"} berstatus gagal atau mendekati batas.`,
+        detail: `${ccpIssueCount} titik CCP di ${scopedBatches.length} batch ${scope.kind === "all" ? "seluruh wilayah" : "dalam cakupan Anda"} berstatus gagal atau mendekati batas.`,
         href: "/compliance",
         tone: "danger",
         meta:
           batchesOutside.length > 0
-            ? `Batch wilayah lain (${batchesOutside.length}) tidak dihitung di sini — rincian per batch ada di halaman Keamanan Pangan`
-            : "Semua batch demo ada di wilayah Anda — rincian per batch ada di halaman Keamanan Pangan",
+            ? `Batch di luar cakupan (${batchesOutside.length}) tidak dihitung di sini — rincian per batch ada di halaman Keamanan Pangan`
+            : "Semua batch demo ada dalam cakupan Anda — rincian per batch ada di halaman Keamanan Pangan",
       });
     }
 

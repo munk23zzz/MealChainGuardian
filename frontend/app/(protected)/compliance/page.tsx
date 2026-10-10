@@ -21,6 +21,7 @@ import { useAuth } from "@/contexts/auth";
 import { useUrlParam } from "@/hooks/use-url-param";
 import { BIZ_STEP_LABELS, sortByTime } from "@/lib/epcis";
 import { formatDateTime } from "@/lib/format";
+import { MOCK_LOCATIONS } from "@/lib/mock-data";
 import {
   MOCK_BATCHES,
   MOCK_SAMPLE_BANK,
@@ -30,6 +31,7 @@ import {
 import { partitionBatchesByScope } from "@/lib/region-map";
 import { matchParamToIds } from "@/lib/view-params";
 import { scopeForRole } from "@/lib/role";
+import { showAllLabel } from "@/lib/scope";
 
 const COMMODITY_KEYWORDS = [
   "Nasi",
@@ -77,7 +79,7 @@ export default function CompliancePage() {
     [showAllScopes, roleScope],
   );
   const { inScope: scopedBatches, outOfScope } = useMemo(
-    () => partitionBatchesByScope(MOCK_BATCHES, effectiveScope),
+    () => partitionBatchesByScope(MOCK_BATCHES, effectiveScope, MOCK_LOCATIONS),
     [effectiveScope],
   );
 
@@ -127,6 +129,7 @@ export default function CompliancePage() {
       canToggle={roleScope.kind !== "all"}
       showingAll={showAllScopes}
       roleScope={roleScope}
+      locations={MOCK_LOCATIONS}
       onToggle={() => setShowAllScopes((value) => !value)}
     />
   );
@@ -147,8 +150,8 @@ export default function CompliancePage() {
         {header}
         {notice}
         <EmptyState
-          title="Belum ada batch di wilayah Anda"
-          description="Tidak ada batch demo di cakupan peran Anda, jadi tidak ada bukti CCP yang bisa ditampilkan. Batch wilayah lain sengaja tidak dibuka di sini."
+          title="Belum ada batch di cakupan Anda"
+          description="Tidak ada batch demo di cakupan peran Anda, jadi tidak ada bukti CCP yang bisa ditampilkan. Batch di luar cakupan sengaja tidak dibuka di sini."
           action={
             roleScope.kind !== "all" && (
               <Button
@@ -156,7 +159,7 @@ export default function CompliancePage() {
                 size="sm"
                 onClick={() => setShowAllScopes(true)}
               >
-                Tampilkan semua wilayah
+                {showAllLabel(roleScope)}
               </Button>
             )
           }

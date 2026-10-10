@@ -35,13 +35,10 @@ export function ApprovalActions({
   recommendation,
   locationLabel = (id) => id,
   commodityLabel = (id) => id,
-  locationRegion,
 }: {
   recommendation: Recommendation;
   locationLabel?: (id: string) => string;
   commodityLabel?: (id: string) => string;
-  /** Region dari lokasi target — dipakai untuk cek scope sppg_head/nutritionist. */
-  locationRegion?: string;
 }) {
   const queryClient = useQueryClient();
   const { payload, canApprove: userCanApprove } = useAuth();
@@ -134,15 +131,15 @@ export function ApprovalActions({
   const canExecute = recommendation.status === "approved";
   const permitted =
     userCanApprove &&
-    canApproveForLocation(payload, recommendation.targetLocationId, locationRegion);
+    canApproveForLocation(payload, recommendation.targetLocationId);
 
   /**
-   * Alasan penolakan untuk kalimat penjelasan; dihitung lewat lokasi semu
-   * (id + region) agar memakai aturan yang SAMA dengan otorisasi — tidak ada dua
-   * definisi "wilayah" yang bisa berbeda diam-diam.
+   * Alasan penolakan untuk kalimat penjelasan; dihitung lewat lokasi semu agar memakai
+   * aturan yang SAMA dengan otorisasi — tidak ada dua definisi cakupan yang bisa
+   * berbeda diam-diam.
    */
   const denialReason = approvalDenialReason(payload, recommendation, [
-    { id: recommendation.targetLocationId, region: locationRegion },
+    { id: recommendation.targetLocationId },
   ]);
 
   if (!canApprove && !canExecute) {
@@ -194,8 +191,8 @@ export function ApprovalActions({
             aria-hidden
           />
           <span>
-            {denialReason === "outside-region"
-              ? `Lokasi tujuan (${locationLabel(recommendation.targetLocationId)}) di luar wilayah tanggung jawab Anda — approval dilakukan Kepala/Ahli Gizi SPPG di wilayah lokasi tersebut.`
+            {denialReason === "outside-sppg"
+              ? `Lokasi tujuan (${locationLabel(recommendation.targetLocationId)}) bukan SPPG Anda — approval dilakukan Kepala/Ahli Gizi SPPG di lokasi tersebut.`
               : `Anda tidak punya hak approval untuk lokasi tujuan ini (${locationLabel(recommendation.targetLocationId)}).`}
           </span>
         </p>

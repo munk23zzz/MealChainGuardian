@@ -4,6 +4,7 @@
  * payload untuk menentukan UI/role gate. Sumber kebenaran otorisasi tetap backend.
  */
 import type { JwtPayload } from "./api/schema";
+import { isLocationBoundRole } from "./role";
 
 /** Decode payload JWT (base64url) tanpa verifikasi signature. */
 export function decodeJwt(token: string): JwtPayload | null {
@@ -30,20 +31,19 @@ export function hasRole(payload: JwtPayload | null, role: string): boolean {
 }
 
 /**
- * Aturan RBAC:
- * - dinas_admin              : bisa approve untuk lokasi mana pun.
- * - sppg_head                : bisa approve untuk semua lokasi di region-nya.
- * - sppg_nutritionist        : bisa approve untuk semua lokasi di region-nya.
- * - sppg_staff               : hanya bisa approve untuk locationId miliknya.
- * - bgn_monitor              : read-only, tidak bisa approve.
+ * Aturan RBAC (revisi 10 Okt 2026 — selaras `backend/app/core/approval_rules.py`):
+ * - dinas_admin                  : bisa approve untuk lokasi mana pun.
+ * - sppg_head / sppg_nutritionist : HANYA SPPG-nya sendiri (`payload.locationId`).
+ * - sppg_staff                   : hanya lokasi miliknya (`payload.locationId`).
+ * - bgn_monitor                  : read-only, tidak bisa approve.
  *
- * `locationRegion` = region dari lokasi target (mis. "DKI Jakarta").
- * Harus dilempar dari caller yang sudah punya daftar Location.
+ * Kepala/ahli gizi DULU bercakupan seluruh `region`. Backend menuntut approver berasal
+ * dari SPPG penerima (`approver_location_mismatch`), jadi aturan wilayah di sini
+ * menjanjikan tombol Approve yang pasti ditolak server.
  */
 export function canApproveForLocation(
   payload: JwtPayload | null,
   locationId: string,
-  locationRegion?: string,
 ): boolean {
   if (!payload) return false;
 
@@ -52,12 +52,9 @@ export function canApproveForLocation(
 
   if (payload.role === "dinas_admin") return true;
 
-  if (payload.role === "sppg_head" || payload.role === "sppg_nutritionist") {
-    if (!payload.region) return false;
-    return !!locationRegion && locationRegion === payload.region;
-  }
-
-  if (payload.role === "sppg_staff") {
+  if (isLocationBoundRole(payload.role)) {
+    // Satu orang = satu SPPG. Tanpa `locationId` → gagal-tertutup, bukan "semua lokasi".
+    if (!payload.locationId) return false;
     return payload.locationId === locationId;
   }
 
@@ -68,7 +65,7 @@ export function canApproveForLocation(
  * Boleh-tidaknya user menyetujui SATU keputusan tertentu.
  *
  * Pembungkus `canApproveForLocation` yang mengurus hal yang mudah salah:
- * region diambil dari **lokasi tujuan** keputusan (bukan lokasi asal), dan
+ * lokasi yang dibandingkan adalah **lokasi tujuan** keputusan (bukan lokasi asal), dan
  * keputusan tanpa lokasi tujuan yang bisa dicocokkan → ditolak (gagal-tertutup).
  */
 export function canApproveDecision(
@@ -78,7 +75,7 @@ export function canApproveDecision(
 ): boolean {
   const target = locations.find((l) => l.id === decision.targetLocationId);
   if (!target) return false;
-  return canApproveForLocation(payload, target.id, target.region ?? undefined);
+  return canApproveForLocation(payload, target.id);
 }
 
 /** Alasan penolakan approval, untuk kalimat penjelasan di UI (bukan untuk otorisasi). */
@@ -86,13 +83,12 @@ export function approvalDenialReason(
   payload: JwtPayload | null,
   decision: { targetLocationId: string },
   locations: { id: string; region?: string | null }[],
-): "no-role" | "read-only" | "outside-region" | "unknown-location" | null {
+): "no-role" | "read-only" | "outside-sppg" | "unknown-location" | null {
   if (!payload?.role) return "no-role";
   if (payload.canApprove === false) return "read-only";
   const target = locations.find((l) => l.id === decision.targetLocationId);
   if (!target) return "unknown-location";
   if (canApproveDecision(payload, decision, locations)) return null;
-  const scoped =
-    payload.role === "sppg_head" || payload.role === "sppg_nutritionist";
-  return scoped ? "outside-region" : "no-role";
+  // Peran SPPG yang ditolak berarti lokasi tujuannya SPPG lain (bukan "tidak berhak").
+  return isLocationBoundRole(payload.role) ? "outside-sppg" : "no-role";
 }

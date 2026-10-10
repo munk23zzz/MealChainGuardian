@@ -24,7 +24,7 @@ import {
   useDecision,
   useLocations,
 } from "@/hooks/use-data";
-import { getWinningCandidate, targetRegion } from "@/lib/decisions";
+import { getWinningCandidate } from "@/lib/decisions";
 import { useAuth } from "@/contexts/auth";
 import { scopeForRole } from "@/lib/role";
 import { decisionTouchesScope } from "@/lib/scope";
@@ -129,7 +129,10 @@ export default function DecisionDetailPage() {
             jangan biarkan tampak seperti keputusan biasa milik user ini. */}
         {!decisionTouchesScope(decision, roleScope, locations) && (
           <p className="mt-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-navy-900">
-            <strong>Di luar wilayah Anda.</strong> Keputusan ini di luar cakupan
+            <strong>
+              {roleScope.kind === "region" ? "Di luar wilayah Anda." : "Di luar SPPG Anda."}
+            </strong>{" "}
+            Keputusan ini di luar cakupan
             peran Anda — boleh dibaca, tetapi approval tidak tersedia untuk akun
             Anda.
           </p>
@@ -321,7 +324,6 @@ export default function DecisionDetailPage() {
           recommendation={decision}
           locationLabel={label}
           commodityLabel={comLabel}
-          locationRegion={targetRegion(decision, locations)}
         />
       </div>
 

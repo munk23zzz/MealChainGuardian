@@ -33,6 +33,7 @@ import { locationStatusLabel } from "@/lib/design-tokens";
 import { expiryState } from "@/lib/expiry";
 import { formatDateTime, formatPercent } from "@/lib/format";
 import { isGlobalRole, scopeForRole } from "@/lib/role";
+import { showAllLabel } from "@/lib/scope";
 import {
   decisionTouchesScope,
   isLocationInScope,
@@ -68,7 +69,7 @@ export default function DashboardPage() {
 
   const [commodityFilter, setCommodityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | LocationStatus>("all");
-  /** Bawaan: cakupan peran saja. User boleh membuka semua wilayah sendiri. */
+  /** Bawaan: cakupan peran saja. User boleh membuka semua SPPG sendiri. */
   const [showAllScopes, setShowAllScopes] = useState(false);
 
   // Data query di-memo agar referensinya stabil (menghindari useMemo di bawah
@@ -128,7 +129,7 @@ export default function DashboardPage() {
 
   // ---------------------------------------------------------------------------
   // Batasan peran (design.md §1.4 "role-aware by default")
-  // kepala/ahli gizi SPPG → wilayahnya; monitor BGN → semua wilayah (read-only).
+  // kepala/ahli gizi SPPG → SPPG-nya sendiri; monitor BGN → semua wilayah (read-only).
   // ---------------------------------------------------------------------------
   const roleScope = useMemo(
     () => scopeForRole(role, { region, locationId }),
@@ -139,7 +140,7 @@ export default function DashboardPage() {
     [showAllScopes, roleScope],
   );
   const isScoped = roleScope.kind !== "all";
-  /** Menampilkan seluruh wilayah — entah karena peran global atau tombol dibuka. */
+  /** Menampilkan seluruh cakupan — entah karena peran global atau tombol dibuka. */
   const showingAll = effectiveScope.kind === "all";
   const isGlobal = isGlobalRole(role);
 
@@ -241,7 +242,7 @@ export default function DashboardPage() {
               ? `Peta diarahkan ke lokasi Anda: ${locationLabel(locationId!, locations)}. Lokasi lain ditampilkan redup.`
               : showingAll
                 ? `Semua wilayah · ${scopedLocations.length} lokasi SPPG dipantau (hijau normal, kuning tight, merah kritis).`
-                : `Wilayah Anda: ${scopeLabel(roleScope)} · ${scopedLocations.length} lokasi SPPG (hijau normal, kuning tight, merah kritis).`}
+                : `Cakupan Anda: ${scopeLabel(roleScope, locations)} · ${scopedLocations.length} lokasi SPPG (hijau normal, kuning tight, merah kritis).`}
           </p>
         </div>
         {lastUpdated > 0 && (
@@ -257,7 +258,7 @@ export default function DashboardPage() {
         <p className="flex flex-wrap items-center gap-2 text-sm text-navy-900">
           <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
           <span>
-            {scopeDescription(effectiveScope, outsideDecisions.length)} ·{" "}
+            {scopeDescription(effectiveScope, outsideDecisions.length, locations)} ·{" "}
             {scopedLocations.length} lokasi
           </span>
         </p>
@@ -275,8 +276,8 @@ export default function DashboardPage() {
               className="tap-target rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
             >
               {showAllScopes
-                ? `Batasi ke ${scopeLabel(roleScope)}`
-                : "Tampilkan semua wilayah"}
+                ? `Batasi ke ${scopeLabel(roleScope, locations)}`
+                : showAllLabel(roleScope)}
             </button>
           )}
         </div>
@@ -422,7 +423,9 @@ export default function DashboardPage() {
       {/* Grid lokasi (design.md §4 LocationCard) */}
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold text-navy-900">
-          {showingAll ? "Status lokasi" : `Status lokasi — ${scopeLabel(roleScope)}`}
+          {showingAll
+            ? "Status lokasi"
+            : `Status lokasi — ${scopeLabel(roleScope, locations)}`}
         </h2>
         {isLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -23,6 +23,7 @@ import {
 import { sortRecommendationsByUrgency } from "@/lib/urgency";
 import { decisionStatusLabel } from "@/lib/design-tokens";
 import { scopeForRole } from "@/lib/role";
+import { showAllLabel } from "@/lib/scope";
 import {
   decisionTouchesScope,
   partitionByScope,
@@ -160,7 +161,7 @@ function DecisionsPageInner() {
         <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
           <p className="flex items-center gap-2 text-sm text-navy-900">
             <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
-            <span>{scopeDescription(effectiveScope, outOfScope.length)}</span>
+            <span>{scopeDescription(effectiveScope, outOfScope.length, locations)}</span>
           </p>
           {roleScope.kind !== "all" && (
             <button
@@ -168,7 +169,7 @@ function DecisionsPageInner() {
               onClick={() => setShowAllScopes((v) => !v)}
               className="tap-target rounded-md border border-border px-3 py-1.5 text-sm text-navy-900 transition-colors hover:border-navy-700/30"
             >
-              {showAllScopes ? "Batasi ke cakupan saya" : "Tampilkan semua wilayah"}
+              {showAllScopes ? "Batasi ke cakupan saya" : showAllLabel(roleScope)}
             </button>
           )}
         </CardContent>

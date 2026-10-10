@@ -10,6 +10,28 @@ const DINAS_TOKEN =
 const SPPG_JAKARTA_TOKEN =
   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MiIsInJvbGUiOiJzcHBnX3N0YWZmIiwibG9jYXRpb25JZCI6Impha2FydGEifQ.sig";
 
+// Payload kepala SPPG dengan locationId — revisi 10 Okt 2026: satu orang = satu SPPG,
+// jadi cakupan approval kepala TIDAK lagi seluruh wilayah melainkan lokasinya sendiri.
+const b64url = (value: string) =>
+  btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const tokenWith = (payload: Record<string, unknown>) =>
+  `${b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${b64url(
+    JSON.stringify(payload),
+  )}.sig`;
+const KEPALA_TOKEN = tokenWith({
+  sub: "u3",
+  role: "sppg_head",
+  locationId: "jakarta",
+  region: "DKI Jakarta",
+  canApprove: true,
+});
+const KEPALA_TANPA_LOKASI_TOKEN = tokenWith({
+  sub: "u4",
+  role: "sppg_head",
+  region: "DKI Jakarta",
+  canApprove: true,
+});
+
 describe("decodeJwt", () => {
   it("men-decode payload JWT yang valid", () => {
     const payload = decodeJwt(DINAS_TOKEN);
@@ -66,6 +88,17 @@ describe("canApproveForLocation", () => {
     expect(canApproveForLocation(decodeJwt(SPPG_JAKARTA_TOKEN), "bogor")).toBe(
       false,
     );
+  });
+
+  it("kepala SPPG hanya bisa approve SPPG-nya sendiri, bukan seluruh wilayah", () => {
+    expect(canApproveForLocation(decodeJwt(KEPALA_TOKEN), "jakarta")).toBe(true);
+    expect(canApproveForLocation(decodeJwt(KEPALA_TOKEN), "bogor")).toBe(false);
+  });
+
+  it("kepala SPPG tanpa locationId tidak bisa approve apa pun (gagal-tertutup)", () => {
+    expect(
+      canApproveForLocation(decodeJwt(KEPALA_TANPA_LOKASI_TOKEN), "jakarta"),
+    ).toBe(false);
   });
 
   it("payload null tidak bisa approve", () => {

@@ -6,6 +6,7 @@ import {
   partitionByScope,
   scopeDescription,
   scopeLabel,
+  showAllLabel,
 } from "./scope";
 import type { DataScope } from "./role";
 import type { Recommendation } from "./api/schema";
@@ -62,7 +63,17 @@ describe("scopeLabel", () => {
   it("memberi label manusiawi untuk tiap jenis cakupan", () => {
     expect(scopeLabel({ kind: "all" })).toBe("semua wilayah");
     expect(scopeLabel({ kind: "region", region: "DKI Jakarta" })).toBe("DKI Jakarta");
-    expect(scopeLabel({ kind: "location", locationId: "loc-5" })).toBe("lokasi sendiri");
+    expect(scopeLabel({ kind: "location", locationId: "loc-5" })).toBe("SPPG Anda");
+  });
+
+  it("cakupan satu SPPG ditulis dengan NAMA SPPG kalau daftar lokasi diberikan", () => {
+    expect(scopeLabel({ kind: "location", locationId: "loc-2" }, locations)).toBe(
+      "SPPG Jakarta Utara",
+    );
+    // Lokasi tak dikenal JANGAN mengarang nama — jatuh ke sebutan umum.
+    expect(scopeLabel({ kind: "location", locationId: "loc-999" }, locations)).toBe(
+      "SPPG Anda",
+    );
   });
 });
 
@@ -148,6 +159,29 @@ describe("scopeDescription", () => {
     );
     expect(scopeDescription({ kind: "region", region: "DKI Jakarta" }, 2)).toBe(
       "menampilkan wilayah DKI Jakarta · 2 di luar wilayah Anda",
+    );
+  });
+
+  it("cakupan satu SPPG menyebut SPPG-nya, bukan kata 'lokasi sendiri'", () => {
+    expect(scopeDescription({ kind: "location", locationId: "loc-2" }, 0, locations)).toBe(
+      "menampilkan SPPG Jakarta Utara",
+    );
+    expect(scopeDescription({ kind: "location", locationId: "loc-2" }, 2, locations)).toBe(
+      "menampilkan SPPG Jakarta Utara · 2 di luar SPPG Anda",
+    );
+    expect(scopeDescription({ kind: "location", locationId: "loc-2" }, 0)).toBe(
+      "menampilkan SPPG Anda",
+    );
+  });
+});
+
+describe("showAllLabel", () => {
+  it("peran SPPG ditawari 'semua SPPG', bukan 'semua wilayah'", () => {
+    expect(showAllLabel({ kind: "location", locationId: "loc-2" })).toBe(
+      "Tampilkan semua SPPG",
+    );
+    expect(showAllLabel({ kind: "region", region: "DKI Jakarta" })).toBe(
+      "Tampilkan semua wilayah",
     );
   });
 });

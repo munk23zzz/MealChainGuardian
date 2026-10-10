@@ -136,7 +136,7 @@ export function CommandPalette() {
         <div className="max-h-[60vh] overflow-y-auto p-2">
           {results.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Tidak ada hasil untuk “{query}”. Cakupan hasil mengikuti wilayah peran Anda.
+              Tidak ada hasil untuk “{query}”. Cakupan hasil mengikuti peran Anda.
             </p>
           )}
 

@@ -67,7 +67,7 @@ export default function KpiPage() {
           <p className="text-muted-foreground">
             {scope.kind === "all"
               ? "Cakupan angka: global (semua wilayah)."
-              : "Catatan jujur untuk demo: angka KPI ini dihitung global di backend, belum ada pemecahan per wilayah — jadi ini BUKAN angka wilayah Anda saja."}
+              : "Catatan jujur untuk demo: angka KPI ini dihitung global di backend, belum ada pemecahan per wilayah/SPPG — jadi ini BUKAN angka cakupan Anda saja."}
           </p>
         </div>
         {dataUpdatedAt > 0 && (

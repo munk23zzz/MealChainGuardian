@@ -388,7 +388,7 @@ export function TopBar() {
             title="Peran Anda dan cakupan data yang ditampilkan"
           >
             <UserCog className="h-3.5 w-3.5" aria-hidden />
-            {roleLine({ role, region, locationId, canApprove })}
+            {roleLine({ role, region, locationId, canApprove }, locations)}
           </span>
         )}
       </div>

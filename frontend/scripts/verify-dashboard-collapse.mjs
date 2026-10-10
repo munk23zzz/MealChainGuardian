@@ -84,8 +84,8 @@ async function main() {
   await nilai(`(() => {
     const b64 = (o) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\\//g, '_').replace(/\\+/g, '-');
     localStorage.setItem(${JSON.stringify(TOKEN_KEY)}, b64({ alg: 'none', typ: 'JWT' }) + '.' + b64({
-      sub: 'user-sppg-head', role: 'sppg_head', region: 'DKI Jakarta',
-      name: 'Kepala SPPG DKI Jakarta', canApprove: true, exp: Math.floor(Date.now() / 1000) + 3600 }) + '.sig');
+      sub: 'user-sppg-head', role: 'sppg_head', locationId: 'loc-2', region: 'DKI Jakarta',
+      name: 'Kepala SPPG Jakarta Utara', canApprove: true, exp: Math.floor(Date.now() / 1000) + 3600 }) + '.sig');
     return 1;
   })()`);
 

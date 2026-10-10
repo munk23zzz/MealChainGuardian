@@ -231,12 +231,12 @@ export default function SuppliersPage() {
         title={
           roleScope.kind === "all"
             ? "Belum ada pemasok terdaftar"
-            : `Tidak ada pemasok untuk ${scopeLabel(roleScope)}`
+            : `Tidak ada pemasok untuk ${scopeLabel(roleScope, locations ?? [])}`
         }
         description={
           roleScope.kind === "all"
             ? "Pemasok muncul di sini begitu ada di master data backend (`suppliers`)."
-            : "Cakupan peran Anda membatasi daftar ke wilayah itu. Pemasok wilayah lain tidak ditampilkan di sini — akun monitor BGN melihat seluruh wilayah."
+            : "Cakupan peran Anda membatasi daftar ke lokasi itu. Pemasok di luar cakupan tidak ditampilkan di sini — akun monitor BGN melihat seluruh wilayah."
         }
       />
     );
@@ -254,7 +254,7 @@ export default function SuppliersPage() {
         <p className="text-muted-foreground">
           {roleScope.kind === "all"
             ? "Cakupan Anda: semua wilayah."
-            : `Cakupan Anda: ${scopeLabel(roleScope)} — hanya pemasok lokasi di wilayah itu yang ditampilkan.`}
+            : `Cakupan Anda: ${scopeLabel(roleScope, locations ?? [])} — hanya pemasok lokasi di cakupan itu yang ditampilkan.`}
         </p>
         {!userCanApprove && (
           <p className="text-muted-foreground">

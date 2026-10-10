@@ -66,7 +66,7 @@ function AgentLogPageInner() {
 
   /**
    * Cakupan peran (design.md §1.4): trace agent memuat rencana pengiriman antar
-   * wilayah, jadi run di luar cakupan tidak ditampilkan — termasuk dari dropdown
+   * SPPG, jadi run di luar cakupan tidak ditampilkan — termasuk dari dropdown
    * filter, supaya tidak ada jalan pintas untuk melihatnya.
    */
   const { role, region, locationId } = useAuth();
@@ -155,7 +155,7 @@ function AgentLogPageInner() {
         <p className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-navy-900">
           <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
           <span>
-            {scopeDescription(roleScope, outsideDecisions.length)} — trace
+            {scopeDescription(roleScope, outsideDecisions.length, locations)} — trace
             keputusan di luar cakupan tidak ditampilkan.
           </span>
         </p>

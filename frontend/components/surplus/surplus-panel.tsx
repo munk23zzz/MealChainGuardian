@@ -92,14 +92,14 @@ export function SurplusPanel({
     batches.find((item) => item.id === selectedId) ?? batches[0];
 
   /**
-   * Tidak ada batch di cakupan peran (mis. kepala SPPG wilayah yang belum punya batch
-   * demo) → jelaskan, jangan hitung rencana dari batch wilayah lain atau batch kosong.
+   * Tidak ada batch di cakupan peran (mis. SPPG yang belum punya batch demo) → jelaskan,
+   * jangan hitung rencana dari batch di luar cakupan atau batch kosong.
    */
   if (!batch) {
     return (
       <EmptyState
-        title="Belum ada batch di wilayah Anda"
-        description="Rencana alokasi sisa pangan hanya bisa disusun untuk batch yang berada di cakupan peran Anda. Batch wilayah lain tidak ditampilkan di sini."
+        title="Belum ada batch di cakupan Anda"
+        description="Rencana alokasi sisa pangan hanya bisa disusun untuk batch yang berada di cakupan peran Anda. Batch di luar cakupan tidak ditampilkan di sini."
         action={emptyAction}
       />
     );
