@@ -75,7 +75,17 @@ async function sesi() {
     mobile: false,
   });
   await send("Page.navigate", { url: `${BASE}/login/?periksa=${Date.now()}` });
-  await sleep(6000);
+  // Jangan andalkan jeda tetap: kunjungan PERTAMA ke situs live ikut memasang service worker
+  // sehingga sering butuh >6 detik. Tunggu sampai halaman benar-benar punya <link rel=icon>,
+  // kalau tidak, pemeriksaan bisa "gagal" padahal hanya belum selesai memuat (pernah kejadian).
+  for (let i = 0; i < 24; i += 1) {
+    await sleep(1000);
+    const siap = await send("Runtime.evaluate", {
+      expression: "!!document.querySelector('link[rel*=icon]') && document.readyState === 'complete'",
+      returnByValue: true,
+    });
+    if (siap.result?.result?.value) break;
+  }
   return { ws, nilai, send };
 }
 
@@ -154,12 +164,13 @@ const favBytes = readFileSync(FAVICON);
 const favSha = createHash("sha1").update(favBytes).digest("base64");
 const ikonHref = laporan.ikon[0] ?? ""; // mis. "/MealChainGuardian/favicon.ico?v=3"
 const favUrl = new URL(ikonHref, `${BASE}/`).href;
+const favAdaHref = ikonHref.startsWith("/") || ikonHref.startsWith("http");
 const favRes = await fetch(favUrl, { cache: "no-store" });
 const favDapat = new Uint8Array(await favRes.arrayBuffer());
 const favSha1 = createHash("sha1").update(favDapat).digest("base64");
 periksa(
   "favicon yang disajikan identik dengan public/favicon.ico",
-  favRes.status === 200 && favSha1 === favSha,
+  favAdaHref && favRes.status === 200 && favSha1 === favSha,
   `${favRes.status} · ${favDapat.byteLength} B · sha1 ${favSha1.slice(0, 12)} (repo: ${favBytes.byteLength} B sha1 ${favSha.slice(0, 12)})`,
 );
 
