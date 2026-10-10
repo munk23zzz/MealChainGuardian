@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import logoMark from "@/assets/logo-mark.png";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "@/contexts/sidebar";
 import { useAuth } from "@/contexts/auth";
@@ -45,12 +46,14 @@ const ICON_BY_HREF: Record<string, typeof LayoutDashboard> = {
 };
 
 /**
- * Aset logo rail. `logo-mark.png` sudah dipangkas ke batas alfa-nya, sedangkan `logo.png`
- * (500x500) menyisakan margin kosong ~54% sehingga pada kotak 28px tandanya hanya ter-render
- * ~13px dan terbaca seperti kotak kosong. Base path ditulis manual: `next/image` tidak
- * menambahkannya untuk aset `public/` saat ekspor statis.
+ * Aset logo rail: `assets/logo-mark.png` (96x96, sudah dipangkas ke batas alfanya).
+ * SENGAJA diimpor sebagai modul, bukan ditulis sebagai URL string ke `public/`: Next
+ * memberi URL ber-hash (`/_next/static/media/logo-mark.<hash>.png`) plus basePath, sehingga
+ * begitu logo diganti, URL-nya ikut berubah dan cache browser/service worker tidak bisa
+ * menyajikan artwork lama — dulu ini terjadi dan logo baru tidak sampai ke pengguna.
+ * `logo.png` tetap ada di `public/img/` sebagai sumber/master (bukan untuk UI: 500x500
+ * dengan margin kosong besar sehingga pada kotak 28px tandanya hanya ter-render ~13px).
  */
-const LOGO_MARK = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/img/logo-mark.png`;
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -130,7 +133,7 @@ export function Sidebar() {
                   sementara namanya tertulis sebagai teks di sebelah kanan. Kalau nanti terasa
                   terlalu samar, kembalikan `bg-white rounded-lg` di div ini. */}
               <Image
-                src={LOGO_MARK}
+                src={logoMark}
                 alt=""
                 aria-hidden="true"
                 width={28}
@@ -150,7 +153,7 @@ export function Sidebar() {
             >
               {/* Dekoratif: nama aksesibelnya dipegang tombol ini */}
               <Image
-                src={LOGO_MARK}
+                src={logoMark}
                 alt=""
                 aria-hidden="true"
                 width={28}

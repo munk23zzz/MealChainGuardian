@@ -21,12 +21,22 @@ const inter = Inter({
 // jadi manifest ditulis lengkap di sini.
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
+// Favicon dirujuk EKSPLISIT dari `public/favicon.ico` (bukan konvensi `app/favicon.ico`)
+// supaya URL-nya bisa diberi query versi: peramban menyimpan favicon jauh lebih agresif
+// daripada aset lain, jadi tanpa versi barunya sering tidak muncul walau berkas di server
+// sudah berganti (kejadian 10 Okt). Naikkan angkanya setiap kali favicon.ico diganti.
+// `app/apple-icon.png` tetap konvensi file — Next menambahkan hash kontennya sendiri.
+const FAVICON_VERSION = "2";
+
 export const metadata: Metadata = {
   title: "MealChain Guardian",
   description:
     "Dashboard guardian untuk kontinuitas pasokan pangan institusional",
   applicationName: "MealChain Guardian",
   manifest: `${BASE_PATH}/manifest.webmanifest`,
+  icons: {
+    icon: [{ url: `${BASE_PATH}/favicon.ico?v=${FAVICON_VERSION}`, type: "image/x-icon" }],
+  },
 };
 
 /**

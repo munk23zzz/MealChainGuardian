@@ -1,7 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-
-const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+import logoMark from "@/assets/logo-mark.png";
 
 export default function NotFound() {
   return (
@@ -9,7 +8,7 @@ export default function NotFound() {
       {/* Mark brand: halaman ini juga punya brand, dan sebelumnya hanya teks. Dekoratif
           karena judul di bawahnya sudah menyebut MealChain Guardian. */}
       <Image
-        src={`${BASE_PATH}/img/logo-mark.png`}
+        src={logoMark}
         alt=""
         aria-hidden="true"
         width={56}

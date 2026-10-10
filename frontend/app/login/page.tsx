@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
+import logoMark from "@/assets/logo-mark.png";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
 import { DEMO_ACCOUNTS } from "@/lib/demo-accounts";
@@ -112,7 +113,7 @@ export default function LoginPage() {
             */}
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
               <Image
-                src={`${BASE_PATH}/img/logo-mark.png`}
+                src={logoMark}
                 alt=""
                 aria-hidden="true"
                 width={28}

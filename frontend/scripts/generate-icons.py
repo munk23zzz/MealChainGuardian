@@ -2,12 +2,19 @@
 
 Output
 ------
-public/img/logo-mark.png            96x96 transparan — mark untuk UI (rail, halaman masuk, 404)
+assets/logo-mark.png                96x96 transparan — mark untuk UI (rail, halaman masuk, 404).
+                                    SENGAJA di luar `public/`: diimpor sebagai modul
+                                    (`import logoMark from "@/assets/logo-mark.png"`) sehingga
+                                    Next memberi URL ber-hash `/_next/static/media/...` — itulah
+                                    yang membuat logo baru langsung sampai ke pengguna tanpa
+                                    menunggu cache browser/service worker kedaluwarsa.
 public/icons/icon-192.png           192x192 di atas putih
 public/icons/icon-512.png           512x512 di atas putih
 public/icons/icon-512-maskable.png  512x512, mark 64% kanvas (aman di safe circle 80%)
 app/apple-icon.png                  180x180 opaque — iOS "Add to Home Screen"
-app/favicon.ico                     16/32/48/256, lihat catatan ukuran kecil di bawah
+                                    (konvensi file App Router: Next menambahkan hash sendiri)
+public/favicon.ico                  16/32/48/256, dirujuk eksplisit di `app/layout.tsx` dengan
+                                    query versi; lihat catatan ukuran kecil di bawah
 
 Dua hal yang TIDAK boleh dilupakan
 ----------------------------------
@@ -37,9 +44,9 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 FRONTEND = Path(os.environ.get("MCG_FRONTEND", Path(__file__).resolve().parents[1]))
 SRC = FRONTEND / "public" / "img" / "logo.png"
-MARK_OUT = FRONTEND / "public" / "img" / "logo-mark.png"
+MARK_OUT = FRONTEND / "assets" / "logo-mark.png"
 ICONS = FRONTEND / "public" / "icons"
-FAVICON = FRONTEND / "app" / "favicon.ico"
+FAVICON = FRONTEND / "public" / "favicon.ico"
 APPLE_ICON = FRONTEND / "app" / "apple-icon.png"
 
 BACKGROUND = (255, 255, 255)
