@@ -4,10 +4,16 @@
  * Strategi:
  * - Dokumen HTML: network-first, jatuh ke cache (atau /dashboard) bila offline —
  *   supaya pengguna tetap bisa membuka layar terakhir.
- * - Aset statis (CSS/JS/ikon): cache-first, lalu simpan salinan.
+ * - Aset statis (CSS/JS/ikon/gambar): STALE-WHILE-REVALIDATE — salinan cache dikirim
+ *   seketika (cepat + bisa offline), sambil versi barunya diambil di latar dan disimpan.
+ *   Kenapa bukan cache-first murni seperti sebelumnya: `public/` tidak ber-hash, jadi
+ *   logo baru pada deploy berikutnya TIDAK PERNAH sampai ke pengguna yang sudah pernah
+ *   membuka situs (terbukti 10 Okt: rail tetap menampilkan logo lama walau berkas di
+ *   server sudah berganti). Dengan SWR, tampilan menyusul di pemuatan berikutnya.
+ * - Chunk Next.js ber-hash (`_next/static/...`) tetap aman: URL-nya selalu baru.
  * Hanya GET ke origin sendiri yang ditangani; sisanya dibiarkan apa adanya.
  */
-const CACHE = "mealchain-shell-v2";
+const CACHE = "mealchain-shell-v3";
 // Base path diturunkan dari lokasi skrip ini sendiri: service worker tidak punya
 // process.env, dan di GitHub Pages aplikasi disajikan di /<repo>/, bukan di akar domain.
 const BASE = new URL(self.location.href).pathname.replace(/\/sw\.js$/, "");
@@ -63,17 +69,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Stale-while-revalidate: kirim cache (kalau ada) segera, perbarui di latar belakang.
+  // Aset tanpa hash (mis. /img/logo-mark.png) WAJIB lewat jalur ini supaya perubahan
+  // pada deploy berikutnya sampai ke pengguna.
   event.respondWith(
-    caches.match(request).then(
-      (hit) =>
-        hit ||
-        fetch(request)
-          .then((response) => {
+    caches.match(request).then((hit) => {
+      const dariJaringan = fetch(request)
+        .then((response) => {
+          if (response && response.ok) {
             const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => undefined);
-            return response;
-          })
-          .catch(() => Response.error()),
-    ),
+            caches
+              .open(CACHE)
+              .then((cache) => cache.put(request, copy))
+              .catch(() => undefined);
+          }
+          return response;
+        })
+        .catch(() => hit || Response.error());
+      return hit || dariJaringan;
+    }),
   );
 });
