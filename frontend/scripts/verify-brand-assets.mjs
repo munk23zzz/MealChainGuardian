@@ -147,6 +147,34 @@ periksa(
 const lama = await fetch(`${BASE}/img/logo-mark.png`, { redirect: "manual" });
 periksa("kontrol negatif (server): /img/logo-mark.png sudah tidak dilayani", lama.status === 404, `status ${lama.status}`);
 
+// 5. favicon: berkas yang disajikan = berkas di repo (favicon punya URL ber-versi, jadi
+//    permintaan di sini memakai href yang benar-benar dipasang halaman).
+const FAVICON = join(FRONTEND, "public", "favicon.ico");
+const favBytes = readFileSync(FAVICON);
+const favSha = createHash("sha1").update(favBytes).digest("base64");
+const ikonHref = laporan.ikon[0] ?? ""; // mis. "/MealChainGuardian/favicon.ico?v=3"
+const favUrl = new URL(ikonHref, `${BASE}/`).href;
+const favRes = await fetch(favUrl, { cache: "no-store" });
+const favDapat = new Uint8Array(await favRes.arrayBuffer());
+const favSha1 = createHash("sha1").update(favDapat).digest("base64");
+periksa(
+  "favicon yang disajikan identik dengan public/favicon.ico",
+  favRes.status === 200 && favSha1 === favSha,
+  `${favRes.status} · ${favDapat.byteLength} B · sha1 ${favSha1.slice(0, 12)} (repo: ${favBytes.byteLength} B sha1 ${favSha.slice(0, 12)})`,
+);
+
+const favIco = (() => {
+  // jumlah entri + ukurannya, tanpa asumsi urutan: baca direktori ICO
+  const jumlah = favDapat[4] | (favDapat[5] << 8);
+  const ukuran = [];
+  for (let i = 0; i < jumlah; i += 1) {
+    const o = 6 + i * 16;
+    ukuran.push(favDapat[o] === 0 ? 256 : favDapat[o]);
+  }
+  return ukuran;
+})();
+periksa("favicon memuat entri 16/32/48/256", JSON.stringify(favIco) === JSON.stringify([16, 32, 48, 256]), `entri ${favIco.join("/")}`);
+
 const gagal = hasil.filter((h) => !h.lulus);
 console.log(
   gagal.length === 0

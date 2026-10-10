@@ -110,14 +110,17 @@ export default function LoginPage() {
               perlakuan dengan rail sidebar + favicon/ikon PWA. Di atas foto berselubung
               navy, kontras warna mark hanya 1,1–2,6:1 — di atas putih 3,8–11,2:1 (terukur).
               Dekoratif: nama brand tertulis di sebelahnya.
+              Ukuran dinaikkan 28→36px di tile 40→48px (permintaan Roy, 10 Okt): artwork
+              baru jauh lebih tajam (sumber efektif 1382x1627 vs 232x276 yang lama), dan
+              pada 28px ketajaman itu tidak terlihat sehingga logo tampak "tidak berubah".
             */}
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
               <Image
                 src={logoMark}
                 alt=""
                 aria-hidden="true"
-                width={28}
-                height={28}
+                width={36}
+                height={36}
                 className="object-contain"
                 priority
               />

@@ -21,13 +21,17 @@ Dua hal yang TIDAK boleh dilupakan
 1. **Potong alfa lebih dulu.** `logo.png` 500x500 hanya memakai 232x276 di tengahnya; kalau
    berkasnya di-resize apa adanya, mark muncul ~46% kotak dan pada 24px terbaca seperti
    kotak kosong.
-2. **Ukuran kecil butuh tepi keras.** Mark penuh pada 16px jadi bubur piksel, bukan karena
-   detailnya, tapi karena setiap piksel tepi hasil downscale hanya ~40-60% alfa sehingga
-   tercampur putih. Alfa dipotong di 128 (`hard_edges`) + coverage dinaikkan ke 0,92 untuk
-   entri 16px; terukur 118 piksel abu-abu -> 0. Siluet satu warna (`silhouette_tile`)
-   sempat diuji dan lebih tajam, tapi kehilangan warna brand dan terbaca sebagai kotak
-   gelap, jadi tidak dipakai. ICO dibangun manual (PNG per entri) karena Pillow hanya bisa
-   menurunkan satu gambar dasar untuk semua ukuran.
+2. **Ukuran kecil butuh tepi keras DAN palet terbatas.** Mark penuh pada 16px jadi bubur piksel,
+   bukan karena detailnya, tapi karena setiap piksel tepi hasil downscale hanya ~40-60% alfa
+   sehingga tercampur putih. Dua langkah dipakai bersama untuk entri 16px:
+   (a) alfa dipotong di 128 (`hard_edges`) + coverage dinaikkan ke 0,98;
+   (b) `snap_palette()` memaksa setiap piksel ke palet brand terdekat (lihat `brand_palette`).
+   Tanpa (b), versi tepi-keras masih memakai 211 warna berbeda di 256 piksel; dengan (b) hanya 5
+   warna — bentuknya jadi blok warna bersih, bukan kabut hijau-abu. Tiga jalan yang DIUJI dan
+   ditolak (10 Okt): menebalkan garis gelap (rantai jadi dominan, terbaca seperti cincin gelap),
+   kuantisasi ADAPTIVE (`bisukan()` di scratch — hasilnya pucat), dan siluet satu warna
+   (`silhouette_tile`) — kehilangan warna brand dan terbaca sebagai "kotak gelap". ICO dibangun
+   manual (PNG per entri) karena Pillow hanya bisa menurunkan satu gambar dasar untuk semua ukuran.
 
 Butuh Pillow (bukan dependensi proyek): `pip install pillow`.
 
@@ -56,7 +60,7 @@ COVERAGE_MARK = 1.00      # aset UI: padding datang dari tile di sekelilingnya
 COVERAGE_ANY = 0.72       # ikon biasa
 COVERAGE_MASKABLE = 0.64  # di dalam safe circle 80%
 COVERAGE_FAVICON = 0.80   # 32px ke atas
-COVERAGE_TINY = 0.92      # 16px: hampir memenuhi kanvas + tepi keras (lihat hard_edges)
+COVERAGE_TINY = 0.98      # 16px: memenuhi kanvas + tepi keras + palet terbatas (lihat snap_palette)
 
 
 def trimmed_mark() -> Image.Image:
@@ -132,6 +136,52 @@ def hard_edges(mark: Image.Image) -> Image.Image:
     return Image.merge("RGBA", (*mark.split()[:3], alpha))
 
 
+def brand_palette(mark: Image.Image, n: int = 4) -> list[tuple[int, int, int]]:
+    """Palet brand untuk `snap_palette`: warna dominan mark (di atas putih) + putih.
+
+    Diturunkan dari artwork, bukan ditulis tangan, supaya tetap benar kalau sumbernya diganti.
+    Metodenya FASTOCTREE: MEDIANCUT pada gambar yang banyak tepi ber-alfa cenderung menghasilkan
+    palet kelabu (terukur 10 Okt: MEDIANCUT -> putih + (129,161,152) saja, yaitu kabut), sedangkan
+    FASTOCTREE memisahkan putih, teal tua, dan hijau seperti yang terlihat di artwork.
+    """
+    kanvas = _paste(Image.new("RGB", (256, 256), BACKGROUND), fitted(mark, 240))
+    quantized = kanvas.quantize(colors=n + 1, method=Image.Quantize.FASTOCTREE)
+    mentah: list[int] = list(quantized.getpalette() or [])
+    warna_kuant: list[tuple[int, int, int]] = [
+        (mentah[i], mentah[i + 1], mentah[i + 2])
+        for i in range(0, min(len(mentah), (n + 1) * 3) - 2, 3)
+    ]
+    hasil: list[tuple[int, int, int]] = []
+    for warna in [BACKGROUND, *warna_kuant]:
+        if all(sum((a - b) ** 2 for a, b in zip(warna, ada)) > 30**2 for ada in hasil):
+            hasil.append(warna)
+    return hasil
+
+
+def snap_palette(img: Image.Image, palet: list[tuple[int, int, int]]) -> Image.Image:
+    """Paksa setiap piksel ke warna palet TERDEKAT — buang warna antara.
+
+    Ini langkah yang membuat favicon 16px "tegas", bukan sekadar tepi keras: versi tepi-keras
+    masih memakai ~200 warna berbeda di 256 piksel (campuran tepi + latar) sehingga terbaca
+    sebagai kabut; dengan snap hanya ~5 warna tersisa dan bentuknya jadi blok warna bersih.
+    """
+    # CATATAN: `convert()` mode sama mengembalikan SALINAN — pixel harus ditulis ke salinan itu,
+    # bukan ke `img` aslinya (kalau tidak, hasil snap tidak terpakai).
+    hasil = img.convert("RGB")
+    px = hasil.load()
+    if px is None:  # tidak terjadi untuk gambar di memori; menjaga pemeriksa tipe
+        return hasil
+    for y in range(hasil.height):
+        for x in range(hasil.width):
+            r, g, b = px[x, y]  # type: ignore[misc]
+
+            def jarak(warna: tuple[int, int, int], r=r, g=g, b=b) -> int:
+                return (warna[0] - r) ** 2 + (warna[1] - g) ** 2 + (warna[2] - b) ** 2
+
+            px[x, y] = min(palet, key=jarak)
+    return hasil
+
+
 def write_ico(entries: list[tuple[int, Image.Image]], out: Path) -> None:
     """Tulis ICO dari beberapa gambar berbeda (PNG per entri) — Pillow hanya bisa menurunkan
     SATU gambar dasar untuk semua ukuran, sedangkan kita butuh siluet di 16px."""
@@ -183,9 +233,17 @@ def main() -> None:
     apple.save(APPLE_ICON, format="PNG", optimize=True)
     print(f"tulis {APPLE_ICON.name} {apple.size} {APPLE_ICON.stat().st_size} B")
 
+    palet = brand_palette(mark)
+    print(f"palet favicon ({len(palet)} warna): {palet}")
     entries = [
-        (16, opaque_tile(mark, 16, COVERAGE_TINY, crisp=True)),  # tepi keras: ini yang membuat 16px tajam
-        (32, opaque_tile(mark, 32, COVERAGE_FAVICON)),
+        # 16px & 32px = ikon yang muncul di TAB peramban (32px dipakai saat layar retina,
+        # ditampilkan pada 16 CSS px). Keduanya dapat perlakuan sama: tepi keras + snap palet,
+        # supaya tajam di 1x DAN tidak pucat di 2x. Tanpa snap, entri ini memakai ~200 warna
+        # campuran dan terbaca sebagai kabut hijau-abu.
+        (16, snap_palette(opaque_tile(mark, 16, COVERAGE_TINY, crisp=True), palet)),
+        (32, snap_palette(opaque_tile(mark, 32, COVERAGE_FAVICON, crisp=True), palet)),
+        # 48px & 256px: dipakai untuk pintasan/taskbar/PWA — ukurannya cukup besar sehingga
+        # gradasi halus lebih berguna daripada blok warna; biarkan ber-alfa-halus.
         (48, opaque_tile(mark, 48, COVERAGE_FAVICON)),
         (256, opaque_tile(mark, 256, COVERAGE_FAVICON)),
     ]

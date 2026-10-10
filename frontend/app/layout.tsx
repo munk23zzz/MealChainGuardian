@@ -26,7 +26,7 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // daripada aset lain, jadi tanpa versi barunya sering tidak muncul walau berkas di server
 // sudah berganti (kejadian 10 Okt). Naikkan angkanya setiap kali favicon.ico diganti.
 // `app/apple-icon.png` tetap konvensi file — Next menambahkan hash kontennya sendiri.
-const FAVICON_VERSION = "2";
+const FAVICON_VERSION = "3";
 
 export const metadata: Metadata = {
   title: "MealChain Guardian",
