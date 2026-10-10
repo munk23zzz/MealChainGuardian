@@ -13,3 +13,7 @@ docker-compose.override.yml
 /TODO.md
 /workflows.md
 /PERMINTAAN-BERKAS.md
+
+# Python: sisa impor skrip pembantu (mis. pemuatan generate-icons.py saat menguji palet)
+__pycache__/
+*.pyc
