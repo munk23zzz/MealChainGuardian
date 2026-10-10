@@ -121,14 +121,20 @@ export function Sidebar() {
         {/* Logo / Brand — di rail yang tertutup, logo itu sendiri adalah tombol pembuka. */}
         <div className="flex items-center gap-2 px-3 py-4 shrink-0">
           {expanded ? (
-            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white select-none">
-              {/* Dekoratif: nama brand tertulis tepat di sebelahnya */}
+            <div className="relative flex h-8 w-8 shrink-0 items-center justify-center select-none">
+              {/* Dekoratif: nama brand tertulis tepat di sebelahnya.
+                  TANPA tile putih (permintaan Roy, 10 Okt): mark transparan langsung di atas
+                  biru rail. Catatan terukur: mark di atas `brand #0969DA` hanya 1,12-2,57:1
+                  (di bawah ambang 3:1 untuk grafik bermakna), jadi keterbacaannya memang
+                  turun. Ini disengaja dan aman karena mark-nya dekoratif (alt="" + aria-hidden)
+                  sementara namanya tertulis sebagai teks di sebelah kanan. Kalau nanti terasa
+                  terlalu samar, kembalikan `bg-white rounded-lg` di div ini. */}
               <Image
                 src={LOGO_MARK}
                 alt=""
                 aria-hidden="true"
-                width={24}
-                height={24}
+                width={28}
+                height={28}
                 className="object-contain"
                 priority
               />
@@ -140,20 +146,21 @@ export function Sidebar() {
               aria-label="Buka sidebar"
               aria-expanded={false}
               title="Buka sidebar"
-              className="group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              className="group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
             >
               {/* Dekoratif: nama aksesibelnya dipegang tombol ini */}
               <Image
                 src={LOGO_MARK}
                 alt=""
                 aria-hidden="true"
-                width={24}
-                height={24}
+                width={28}
+                height={28}
                 className="object-contain group-hover:hidden"
                 priority
               />
+              {/* Chevron putih: latarnya biru (tanpa tile putih lagi) */}
               <ChevronRight
-                className="h-4 w-4 hidden group-hover:block text-brand"
+                className="h-4 w-4 hidden group-hover:block text-white"
                 aria-hidden="true"
               />
             </button>
